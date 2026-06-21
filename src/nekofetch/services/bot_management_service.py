@@ -112,10 +112,52 @@ class BotManagementService:
     async def bind_title(self, bot_id: int, anime_doc_id: str | None) -> None:
         """Bind a distribution bot to a single title (or clear with None).
 
-        A bound bot opens directly on that title's page instead of the catalog.
+        A bound bot opens directly on that title's page instead of the catalog. Binding also
+        auto-brands the bot and refreshes its main-channel post so Download deep-links work.
         """
         async with session_scope(self._c.pg_sessionmaker) as session:
             rec = await session.get(DistributionBot, bot_id)
             if rec:
                 rec.anime_doc_id = anime_doc_id or None
         log.info("bot.bound", id=bot_id, anime=anime_doc_id)
+
+        if not anime_doc_id:
+            return
+        # Auto-brand the live bot (best-effort) and refresh the main-channel post.
+        manager = getattr(self._c, "bot_manager", None)
+        client = manager.get_client(bot_id) if manager else None
+        if client is not None:
+            from nekofetch.services.bot_branding import apply_bot_branding
+
+            await apply_bot_branding(self._c, client, anime_doc_id)
+        from nekofetch.services.main_channel_service import MainChannelService
+
+        await MainChannelService(self._c).publish(anime_doc_id)
+
+    async def pending_bot_animes(self) -> list[tuple[str, str]]:
+        """Titles that have stored content but no enabled bot bound yet."""
+        from sqlalchemy import distinct
+
+        from nekofetch.infrastructure.database.postgres.models import StoragePack
+
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            packs = (
+                await session.execute(
+                    select(distinct(StoragePack.anime_doc_id), StoragePack.anime_title)
+                )
+            ).all()
+            bound = set(
+                (
+                    await session.execute(
+                        select(DistributionBot.anime_doc_id).where(
+                            DistributionBot.anime_doc_id.is_not(None),
+                            DistributionBot.enabled.is_(True),
+                        )
+                    )
+                ).scalars().all()
+            )
+        seen: dict[str, str] = {}
+        for doc_id, title in packs:
+            if doc_id not in bound:
+                seen.setdefault(doc_id, title)
+        return list(seen.items())

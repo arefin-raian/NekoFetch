@@ -95,6 +95,10 @@ class BotManager:
             except Exception as exc:  # one bad token must not stop the fleet
                 log.error("bots.distribution.failed", id=row.id, error=str(exc))
 
+    def get_client(self, bot_id: int):
+        """Return the running Pyrogram client for a distribution bot, if any."""
+        return self._distribution.get(bot_id)
+
     async def add_distribution_bot(self, bot_id: int) -> None:
         """Start a single newly-registered distribution bot at runtime."""
         from nekofetch.bots.distribution.app import build_distribution_bot

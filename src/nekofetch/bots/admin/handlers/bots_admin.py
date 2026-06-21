@@ -51,6 +51,12 @@ def register(client: Client, container: Container) -> None:
             body = "\n".join(lines)
         else:
             body = "No distribution bots yet."
+        # Titles with content but no bot yet (provide a token + bind to launch them).
+        pending = await BotManagementService(container).pending_bot_animes()
+        if pending:
+            body += "\n\n**Awaiting a bot:**\n" + "\n".join(
+                f"{DIAMOND_HOLLOW} {title}  (`{doc}`)" for doc, title in pending[:15]
+            )
         rows.append([("➜ Add Bot", cb("botmgr", "add"))])
         rows.append([("◂ Back", cb("admin", "home"))])
         await q.message.edit_text(
