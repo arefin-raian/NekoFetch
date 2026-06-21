@@ -205,6 +205,21 @@ class StoragePack(Base, PKMixin, TimestampMixin):
     )
 
 
+class ChannelPost(Base, PKMixin, TimestampMixin):
+    """Tracks where an anime has been posted (main channel post + index entry).
+
+    Lets the bot edit/update those posts in place instead of reposting.
+    """
+
+    __tablename__ = "channel_posts"
+
+    anime_doc_id: Mapped[str] = mapped_column(String(48), unique=True, index=True, nullable=False)
+    main_channel_id: Mapped[int | None] = mapped_column(BigInteger)
+    main_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    index_letter: Mapped[str | None] = mapped_column(String(2))
+    index_message_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
 class AnalyticsEvent(Base, PKMixin):
     __tablename__ = "analytics_events"
 

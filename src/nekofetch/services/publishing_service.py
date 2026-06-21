@@ -98,6 +98,15 @@ class PublishingService:
         )
         await self._upload_packs(anime_doc_id, title, snapshot)
 
+        # Post to the main channel + refresh the index entry (both no-op when disabled).
+        from nekofetch.services.index_channel_service import IndexChannelService
+        from nekofetch.services.main_channel_service import MainChannelService
+
+        await MainChannelService(self._c).publish(anime_doc_id)
+        await IndexChannelService(self._c).refresh_letter(
+            IndexChannelService.letter_of(title)
+        )
+
         from nekofetch.services.log_channel_service import LogChannelService
 
         await LogChannelService(self._c).event(

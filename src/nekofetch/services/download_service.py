@@ -84,51 +84,78 @@ class DownloadWorker:
                 episodes = [e for e in episodes if e.number in set(req.episodes)]
             job.started_at = _now()
 
-        # Download each episode's chosen variant.
+        targets = self._targets(req)  # (resolution, audio) combos to acquire
+
+        # For each episode, acquire every requested quality x language combo. Combos that
+        # the source doesn't offer are skipped (not an error).
         for ep in episodes:
             variants = await source.get_variants(ep.source_ref)
-            variant = _pick_variant(variants, req.resolution, req.audio) or variants[0]
-            dest = (
-                self._c.env.storage_path
-                / "work"
-                / f"{req.source_ref}"
-                / f"S{ep.season:02d}E{ep.number:03d}.{variant.container or 'mkv'}"
-            )
+            for resolution, audio in targets:
+                variant = _select_variant(
+                    variants, resolution, audio, self._c.config.acquisition.require_english_subs
+                )
+                if variant is None:
+                    continue
+                dest = (
+                    self._c.env.storage_path
+                    / "work"
+                    / f"{req.source_ref}"
+                    / f"S{ep.season:02d}E{ep.number:03d}_{variant.resolution}_{variant.audio.value}"
+                    f".{variant.container or 'mkv'}"
+                )
 
-            start = time.monotonic()
-            last_emit = 0.0
+                start = time.monotonic()
+                last_emit = 0.0
 
-            async def on_progress(done: int, total: int, _ep=ep, _start=start) -> None:
-                nonlocal last_emit
-                now = time.monotonic()
-                if now - last_emit < cfg.progress_update_interval_seconds:
-                    return
-                last_emit = now
-                elapsed = max(now - _start, 1e-6)
-                speed = done / elapsed
-                pct = (done / total * 100) if total else 0.0
-                eta = int((total - done) / speed) if speed > 0 else None
-                if self._c.progress:
-                    await self._c.progress.set(
-                        ProgressSnapshot(
-                            job_id=job_id,
-                            status=JobStatus.RUNNING.value,
-                            progress=pct,
-                            speed_bps=speed,
-                            downloaded_bytes=done,
-                            total_bytes=total,
-                            current_episode=_ep.number,
-                            eta_seconds=eta,
-                            label=f"S{_ep.season:02d}E{_ep.number:03d}",
+                async def on_progress(done: int, total: int, _ep=ep, _start=start,
+                                      _v=variant) -> None:
+                    nonlocal last_emit
+                    now = time.monotonic()
+                    if now - last_emit < cfg.progress_update_interval_seconds:
+                        return
+                    last_emit = now
+                    elapsed = max(now - _start, 1e-6)
+                    speed = done / elapsed
+                    pct = (done / total * 100) if total else 0.0
+                    eta = int((total - done) / speed) if speed > 0 else None
+                    if self._c.progress:
+                        await self._c.progress.set(
+                            ProgressSnapshot(
+                                job_id=job_id,
+                                status=JobStatus.RUNNING.value,
+                                progress=pct,
+                                speed_bps=speed,
+                                downloaded_bytes=done,
+                                total_bytes=total,
+                                current_episode=_ep.number,
+                                eta_seconds=eta,
+                                label=f"S{_ep.season:02d}E{_ep.number:03d} {_v.resolution} {_v.audio.value}",
+                            )
                         )
-                    )
 
-            result = await self._download_with_retry(
-                source, variant, dest, on_progress, cfg.retry_attempts, cfg.retry_backoff_seconds
-            )
-            await self._record_file(job_id, req, ep, variant, dest, result)
+                result = await self._download_with_retry(
+                    source, variant, dest, on_progress,
+                    cfg.retry_attempts, cfg.retry_backoff_seconds,
+                )
+                await self._record_file(job_id, req, ep, variant, dest, result)
 
         await self._complete(job_id)
+
+    def _targets(self, req) -> list[tuple[str | None, AudioType]]:
+        """Resolve the (resolution, audio) combos to acquire for a request.
+
+        A fully-specified request yields one combo; an unspecified one fans out into the
+        configured acquisition matrix (all resolutions x english/japanese).
+        """
+        acq = self._c.config.acquisition
+        if req.resolution and req.audio:
+            return [(req.resolution, req.audio)]
+        resolutions = [req.resolution] if req.resolution else list(acq.resolutions)
+        if req.audio:
+            audios = [req.audio]
+        else:
+            audios = [a for a in (_audio_for_language(lang) for lang in acq.languages) if a]
+        return [(r, a) for r in resolutions for a in audios]
 
     async def _download_with_retry(
         self, source, variant, dest, on_progress, attempts, backoff
@@ -198,13 +225,35 @@ class DownloadWorker:
         await LogChannelService(self._c).event("error", "download_failed", job=job_id, error=str(exc))
 
 
-def _pick_variant(variants, resolution, audio):
-    for v in variants:
-        if (resolution is None or v.resolution == resolution) and (
-            audio is None or v.audio == audio
-        ):
-            return v
-    return None
+def _audio_for_language(language: str) -> AudioType | None:
+    return {
+        "english": AudioType.DUBBED,
+        "japanese": AudioType.SUBBED,
+        "dual": AudioType.DUAL_AUDIO,
+        "dual_audio": AudioType.DUAL_AUDIO,
+    }.get(language.lower())
+
+
+def _select_variant(variants, resolution, audio, require_english_subs: bool):
+    """Pick the variant matching resolution + audio, preferring English subtitles.
+
+    Returns None when the exact combo isn't offered (so unavailable combos are skipped).
+    """
+    cands = list(variants)
+    if resolution:
+        cands = [v for v in cands if v.resolution == resolution]
+    if audio is not None:
+        cands = [v for v in cands if v.audio == audio]
+    if not cands:
+        return None
+    if require_english_subs:
+        with_en = [
+            v for v in cands
+            if not v.subtitles or any("en" in s.lower() for s in v.subtitles)
+        ]
+        if with_en:
+            cands = with_en
+    return cands[0]
 
 
 def _now():

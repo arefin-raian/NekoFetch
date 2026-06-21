@@ -114,6 +114,36 @@ log_channel:
   refresh_seconds: 60
   events: [all]                 # 'all' = everything; or a subset of categories
 
+# Acquisition matrix: when a request doesn't pin a quality/language, fetch all of these.
+# languages map to audio: english = Dub, japanese = Sub (always with English subtitles).
+acquisition:
+  resolutions: [360p, 540p, 720p, 1080p]
+  languages: [english, japanese]
+  require_english_subs: true
+
+# Main channel: each published anime is posted here with poster + [Index][Download].
+main_channel:
+  enabled: false
+  channel_id: 0
+  caption_template: |-
+    {title} 『 #{tag} 』
+
+    ⌬ EPISODES : {episodes}
+    ⌬ QUALITY : {qualities}
+    ⌬ LANGUAGE : {languages}
+    ⌬ GENRE : {genres}
+
+    ‣ OverView : {overview}
+  index_button_text: "Index"
+  download_button_text: "Download"
+
+# Index channel: stylized per-letter index posts the bot maintains.
+index_channel:
+  enabled: false
+  channel_id: 0
+  letter_header_template: "•──────────•°• {letter} •°•──────────•"
+  entry_template: "⦿ {title}"
+
 sources:
   # Only authorized sources are enabled. Pirate-site plugins are not shipped.
   enabled: [local]

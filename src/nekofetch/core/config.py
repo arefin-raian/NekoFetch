@@ -207,6 +207,46 @@ class LogChannelConfig(BaseModel):
     events: list[str] = Field(default_factory=lambda: ["all"])
 
 
+class AcquisitionConfig(BaseModel):
+    """What to fetch when a request doesn't pin a specific quality/language.
+
+    A request with no resolution/audio fans out into the full matrix below. ``languages``
+    map to audio tracks: english = Dub, japanese = Sub (always with English subtitles).
+    """
+
+    resolutions: list[str] = Field(default_factory=lambda: ["360p", "540p", "720p", "1080p"])
+    languages: list[str] = Field(default_factory=lambda: ["english", "japanese"])
+    require_english_subs: bool = True
+
+
+class MainChannelConfig(BaseModel):
+    """The public 'main' channel where each published anime is posted."""
+
+    enabled: bool = False
+    channel_id: int = 0
+    # Variables: {title} {tag} {episodes} {qualities} {languages} {genres} {overview}
+    caption_template: str = (
+        "{title} 『 #{tag} 』\n\n"
+        "⌬ EPISODES : {episodes}\n"
+        "⌬ QUALITY : {qualities}\n"
+        "⌬ LANGUAGE : {languages}\n"
+        "⌬ GENRE : {genres}\n\n"
+        "‣ OverView : {overview}"
+    )
+    index_button_text: str = "Index"
+    download_button_text: str = "Download"
+
+
+class IndexChannelConfig(BaseModel):
+    """A channel holding stylized, per-letter index posts the bot maintains."""
+
+    enabled: bool = False
+    channel_id: int = 0
+    # Rendered per first-letter. Variables: {letter} {entries}
+    letter_header_template: str = "•──────────•°• {letter} •°•──────────•"
+    entry_template: str = "⦿ {title}"
+
+
 class SourcesConfig(BaseModel):
     enabled: list[str] = Field(default_factory=lambda: ["local"])
     default: str = "local"
@@ -233,6 +273,9 @@ class AppConfig(BaseModel):
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     storage_channel: StorageChannelConfig = Field(default_factory=StorageChannelConfig)
     log_channel: LogChannelConfig = Field(default_factory=LogChannelConfig)
+    main_channel: MainChannelConfig = Field(default_factory=MainChannelConfig)
+    index_channel: IndexChannelConfig = Field(default_factory=IndexChannelConfig)
+    acquisition: AcquisitionConfig = Field(default_factory=AcquisitionConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     localization: LocalizationConfig = Field(default_factory=LocalizationConfig)
 

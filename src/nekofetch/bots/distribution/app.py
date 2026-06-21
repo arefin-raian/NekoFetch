@@ -55,6 +55,12 @@ def build_distribution_bot(
     async def _start(_: Client, message: Message) -> None:
         if not await _passes_force_sub(message):
             return
+        # Deep-link payload, e.g. /start anime_<doc_id> from the main-channel Download button.
+        parts = (message.text or "").split(maxsplit=1)
+        payload = parts[1].strip() if len(parts) > 1 else ""
+        if payload.startswith("anime_"):
+            await _show_title(message, payload[len("anime_"):])
+            return
         if record.anime_doc_id:
             await _show_title(message, record.anime_doc_id)
         else:
