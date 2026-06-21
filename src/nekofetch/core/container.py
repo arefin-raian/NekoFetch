@@ -77,7 +77,8 @@ class Container:
 
         self.pg_engine = create_async_engine(self.env.postgres_dsn, pool_pre_ping=True)
         self.pg_sessionmaker = async_sessionmaker(self.pg_engine, expire_on_commit=False)
-        await create_all(self.pg_engine)  # dev convenience; Alembic owns prod schema
+        if self.env.auto_create_schema:
+            await create_all(self.pg_engine)  # dev convenience; Alembic owns prod schema
 
         self.mongo = AsyncIOMotorClient(self.env.mongo_uri)[self.env.mongo_db]
         self.collections = Collections(self.mongo)

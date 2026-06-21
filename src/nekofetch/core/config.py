@@ -62,6 +62,10 @@ class EnvSettings(BaseSettings):
     log_level: str = Field("INFO", alias="LOG_LEVEL")
     log_json: bool = Field(False, alias="LOG_JSON")
 
+    # Schema management: True auto-creates tables on startup (dev convenience).
+    # Set False in production and manage the schema with Alembic migrations.
+    auto_create_schema: bool = Field(True, alias="AUTO_CREATE_SCHEMA")
+
     @field_validator("admin_ids", mode="before")
     @classmethod
     def _split_admin_ids(cls, v: Any) -> Any:
