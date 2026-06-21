@@ -18,6 +18,7 @@ def register_all(client: Client, container: Container) -> None:
         bots_admin,
         requests,
         settings,
+        staff_admin,
         start,
         storage_admin,
     )
@@ -31,3 +32,4 @@ def register_all(client: Client, container: Container) -> None:
     bots_admin.register(client, container)
     storage_admin.register(client, container)
     admin_tools.register(client, container)
+    staff_admin.register(client, container)

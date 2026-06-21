@@ -37,6 +37,18 @@ class UserRepository(BaseRepository[User]):
         result = await self.session.execute(select(User).where(User.role == role))
         return list(result.scalars().all())
 
+    async def set_banned(self, telegram_id: int, banned: bool) -> User | None:
+        user = await self.get_by_telegram_id(telegram_id)
+        if user is not None:
+            user.is_banned = banned
+        return user
+
+    async def set_approved(self, telegram_id: int, approved: bool) -> User | None:
+        user = await self.get_by_telegram_id(telegram_id)
+        if user is not None:
+            user.is_approved = approved
+        return user
+
     async def count(self) -> int:
         result = await self.session.execute(select(func.count()).select_from(User))
         return int(result.scalar_one())
