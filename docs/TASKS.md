@@ -4,8 +4,7 @@
 
 ## In Progress
 
-- **GitHub integration** — local git initialized with conventional commits; awaiting
-  operator GitHub token/username/repo to create the remote and push.
+- (none) — v0.1 milestone complete.
 
 ## Pending
 
@@ -33,3 +32,4 @@
 - Distribution bots: generation flow, live multi-bot add, anime-bot interface, season-package
   delivery with protected content + temporary links + auto-delete.
 - Local git with logical conventional commits; clean compile of the whole `src` tree.
+- GitHub: public repo created and `main` pushed to https://github.com/arefin-raian/NekoFetch.

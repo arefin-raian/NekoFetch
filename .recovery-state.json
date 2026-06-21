@@ -1,9 +1,9 @@
 {
   "project": "NekoFetch",
-  "current_task": "GitHub push (awaiting operator credentials)",
-  "status": "in_progress",
-  "last_modified": "2026-06-21T20:30:00",
-  "phase": "feature-complete-pending-remote",
+  "current_task": "Feature-complete; pushed to GitHub",
+  "status": "milestone-complete",
+  "last_modified": "2026-06-21T20:45:00",
+  "phase": "v0.1-pushed",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",
@@ -24,7 +24,7 @@
     "Test suite + CI",
     "Optional polish: watermark transcode, force-subscribe, broadcast, per-bot title binding"
   ],
-  "git": {"initialized": true, "branch": "main", "commits": 9, "remote": null},
+  "git": {"initialized": true, "branch": "main", "commits": 10, "remote": "https://github.com/arefin-raian/NekoFetch"},
   "verification": "python -m compileall src passes",
   "notes": "Authorized-only content policy. No pirate-site scrapers. python -m nekofetch boots admin bot /start welcome."
 }
