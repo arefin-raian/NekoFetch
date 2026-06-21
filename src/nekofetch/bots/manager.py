@@ -27,6 +27,9 @@ class BotManager:
     async def start(self) -> None:
         from nekofetch.bots.admin.app import build_admin_bot
 
+        # Expose the manager so services can bring bots online without a restart.
+        self._c.bot_manager = self  # type: ignore[attr-defined]
+
         self._admin = build_admin_bot(self._c)
         await self._admin.start()
         log.info("bots.admin.started")
@@ -49,6 +52,7 @@ class BotManager:
 
         # Scheduled maintenance jobs.
         self._scheduler = Scheduler()
+        self._c.scheduler = self._scheduler  # type: ignore[attr-defined]
         dist = DistributionService(self._c)
         if self._c.config.features.temporary_links:
             self._scheduler.every(60, dist.sweep_expired, id="link-expiry-sweep")
@@ -76,6 +80,23 @@ class BotManager:
                 log.info("bots.distribution.started", bot=row.name, id=row.id)
             except Exception as exc:  # one bad token must not stop the fleet
                 log.error("bots.distribution.failed", id=row.id, error=str(exc))
+
+    async def add_distribution_bot(self, bot_id: int) -> None:
+        """Start a single newly-registered distribution bot at runtime."""
+        from nekofetch.bots.distribution.app import build_distribution_bot
+        from nekofetch.infrastructure.database.postgres.models import DistributionBot
+
+        if bot_id in self._distribution:
+            return
+        async with self._c.session() as session:
+            row = await session.get(DistributionBot, bot_id)
+            if row is None or not row.enabled:
+                return
+            token = self._c.cipher.decrypt(row.encrypted_token)
+            client = build_distribution_bot(self._c, row, token)
+        await client.start()
+        self._distribution[bot_id] = client
+        log.info("bots.distribution.added", id=bot_id)
 
     async def stop(self) -> None:
         if self._scheduler is not None:

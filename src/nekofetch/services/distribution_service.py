@@ -37,6 +37,59 @@ class DistributionService:
     def __init__(self, container: Container) -> None:
         self._c = container
 
+    # ── catalog queries (published content only) ──
+    async def published_titles(self, *, limit: int = 50) -> list[tuple[str, str]]:
+        """Distinct (anime_doc_id, title) among published files."""
+        from nekofetch.infrastructure.database.postgres.models import Request
+
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            doc_ids = (
+                await session.execute(
+                    select(MediaFile.anime_doc_id)
+                    .where(MediaFile.published.is_(True))
+                    .distinct()
+                    .limit(limit)
+                )
+            ).scalars().all()
+            out: list[tuple[str, str]] = []
+            for doc_id in doc_ids:
+                title = (
+                    await session.execute(
+                        select(Request.anime_title)
+                        .where(Request.anime_doc_id == doc_id)
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                out.append((doc_id, title or doc_id))
+            return out
+
+    async def seasons_for(self, anime_doc_id: str) -> list[int]:
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            rows = (
+                await session.execute(
+                    select(MediaFile.season)
+                    .where(MediaFile.anime_doc_id == anime_doc_id, MediaFile.published.is_(True))
+                    .distinct()
+                )
+            ).scalars().all()
+            return sorted(s for s in rows if s is not None)
+
+    async def variants_for(self, anime_doc_id: str, season: int) -> list[tuple[str, str]]:
+        """Distinct (resolution, audio) pairs available for a published season."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            rows = (
+                await session.execute(
+                    select(MediaFile.resolution, MediaFile.audio)
+                    .where(
+                        MediaFile.anime_doc_id == anime_doc_id,
+                        MediaFile.season == season,
+                        MediaFile.published.is_(True),
+                    )
+                    .distinct()
+                )
+            ).all()
+            return [(r[0] or "unknown", (r[1].value if r[1] else "subbed")) for r in rows]
+
     async def build_season_package(
         self,
         anime_doc_id: str,
