@@ -1,0 +1,97 @@
+"""Request service — the public request workflow.
+
+Creates requests with human-friendly codes (``REQ-1048``), reports queue position,
+and lists a user's requests. Honors the ``request_system`` feature toggle.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from nekofetch.core.constants import REQUEST_PREFIX
+from nekofetch.core.container import Container
+from nekofetch.core.exceptions import FeatureDisabled, NotFound
+from nekofetch.domain.enums import AudioType, DownloadScope, RequestStatus
+from nekofetch.infrastructure.database.postgres.models import Request
+from nekofetch.infrastructure.database.postgres.session import session_scope
+from nekofetch.infrastructure.repositories.request_repo import RequestRepository
+from nekofetch.infrastructure.repositories.user_repo import UserRepository
+
+
+@dataclass(slots=True)
+class RequestReceipt:
+    code: str
+    position: int
+    status: str
+
+
+class RequestService:
+    def __init__(self, container: Container) -> None:
+        self._c = container
+
+    async def submit(
+        self,
+        *,
+        telegram_id: int,
+        source: str,
+        source_ref: str,
+        anime_title: str,
+        scope: DownloadScope,
+        season: int | None = None,
+        episodes: list[int] | None = None,
+        resolution: str | None = None,
+        audio: AudioType | None = None,
+        anime_doc_id: str | None = None,
+    ) -> RequestReceipt:
+        if not self._c.config.features.request_system:
+            raise FeatureDisabled("request_system")
+
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            users = UserRepository(session)
+            requests = RequestRepository(session)
+
+            user = await users.get_by_telegram_id(telegram_id)
+            if user is None:
+                raise NotFound("user")
+
+            seq = await requests.next_sequence()
+            code = f"{REQUEST_PREFIX}-{seq}"
+            req = Request(
+                code=code,
+                user_id=user.id,
+                anime_doc_id=anime_doc_id,
+                anime_title=anime_title,
+                source=source,
+                source_ref=source_ref,
+                scope=scope.value,
+                season=season,
+                episodes=episodes,
+                resolution=resolution,
+                audio=audio,
+                status=RequestStatus.PENDING,
+            )
+            await requests.add(req)
+            await session.flush()
+            position = await requests.pending_position(req.id)
+            req.position = position
+            return RequestReceipt(code=code, position=position, status=req.status.value)
+
+    async def list_for_user(self, telegram_id: int, *, limit: int = 20) -> list[Request]:
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            users = UserRepository(session)
+            requests = RequestRepository(session)
+            user = await users.get_by_telegram_id(telegram_id)
+            if user is None:
+                return []
+            rows = await requests.list_for_user(user.id, limit=limit)
+            for r in rows:
+                session.expunge(r)
+            return rows
+
+    async def get(self, code: str) -> Request:
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            session.expunge(req)
+            return req
