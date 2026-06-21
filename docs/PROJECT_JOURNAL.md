@@ -75,3 +75,36 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 - Admin bot: request flow handlers, in-Telegram settings panel, queue/analytics views.
 - Distribution: bot generation flow + anime-bot interface + season-package delivery
   (protected/temporary links + auto-delete via APScheduler).
+
+### Session 1 (cont.) — Feature-complete (tasks 1–8), local git
+
+**Completed**
+
+- Full service layer: request, queue, resumable download worker (live progress → Redis),
+  processing pipeline (verify→rename→metadata→branding→thumbnail→store), branding engine,
+  distribution (season packages + temporary/protected links), analytics, settings, publishing.
+- Scheduler wired in (link-expiry sweep + per-message auto-delete).
+- Admin bot fully interactive: Redis FSM, request flow (search→results→content→season→scope→
+  submit), live feature-toggle settings panel (persisted to Mongo), queue + analytics views,
+  publish-approval workflow.
+- Distribution bots: token-paste generation (validated, encrypted, live without restart),
+  live multi-bot manager add, anime-bot interface (catalog/title→season→resolution→language→
+  episodes→season package) with protected content, temporary links, and auto-delete.
+- Local git initialized; 9 clean conventional commits; whole `src` tree compiles.
+
+**Current state**
+
+- Tasks 1–8 complete. Project boots and is feature-complete for the authorized-distribution
+  scope. Only the GitHub remote push (task 9) remains, which needs operator credentials.
+
+**Known issues / open questions**
+
+- `gh` CLI not installed → will push via GitHub API + token-authenticated HTTPS remote.
+- Runtime testing requires real Telegram/API credentials and running Postgres/Mongo/Redis;
+  verification so far is byte-compile (deps not installed in this environment).
+
+**Next planned tasks**
+
+- Create GitHub repo + push (awaiting token/username/repo).
+- Alembic migrations; pytest suite + CI; optional polish (watermark transcode, force-sub,
+  broadcast, per-bot title binding).

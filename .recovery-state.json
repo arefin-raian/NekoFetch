@@ -1,9 +1,9 @@
 {
   "project": "NekoFetch",
-  "current_task": "Admin/distribution bot handlers + GitHub",
+  "current_task": "GitHub push (awaiting operator credentials)",
   "status": "in_progress",
-  "last_modified": "2026-06-21T19:50:00",
-  "phase": "service-layer-complete",
+  "last_modified": "2026-06-21T20:30:00",
+  "phase": "feature-complete-pending-remote",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",
@@ -12,15 +12,19 @@
     "Premium UX kit (progress/templates/i18n/components)",
     "Auth service + bot middleware",
     "Multi-bot manager + admin welcome screen + distribution skeleton",
-    "Service layer: request, queue, download worker, processing pipeline (verify/rename/metadata/branding/thumbnail/store), branding engine, distribution (season packages + temp links), analytics",
-    "Scheduler (link-expiry sweep) + worker wired into bot manager"
+    "Service layer: request, queue, download worker, processing pipeline, branding, distribution, analytics, settings, publishing",
+    "Scheduler (link-expiry sweep + auto-delete) wired into bot manager",
+    "Admin bot: request flow, settings panel (live toggles), queue/analytics views, approval panel",
+    "Distribution bots: generation flow, live multi-bot add, anime-bot interface, season-package delivery (protected/temporary/auto-delete)",
+    "Local git initialized with 9 conventional commits"
   ],
   "next_tasks": [
-    "Admin bot: request flow handlers (search->results->content->scope->submit), settings panel, queue/analytics views, publish-approval panel",
-    "Distribution: bot generation flow + rich anime-bot interface + season-package delivery handlers + auto-delete",
+    "GitHub: create remote + push (needs operator token/username/repo)",
     "Alembic migrations",
-    "GitHub integration (pending operator confirmation to publish externally)"
+    "Test suite + CI",
+    "Optional polish: watermark transcode, force-subscribe, broadcast, per-bot title binding"
   ],
+  "git": {"initialized": true, "branch": "main", "commits": 9, "remote": null},
   "verification": "python -m compileall src passes",
   "notes": "Authorized-only content policy. No pirate-site scrapers. python -m nekofetch boots admin bot /start welcome."
 }

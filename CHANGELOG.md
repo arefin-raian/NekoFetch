@@ -23,3 +23,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
 - Premium UX kit: glyph progress bars, template engine, i18n loader, inline components + pagination.
 - Auth service and bot middleware (user resolution, rate limiting, anti-spam).
 - Multi-bot manager, admin bot with staged-animation welcome screen, distribution-bot skeleton.
+- Full service layer: resumable download worker with live progress, processing pipeline
+  (verify→rename→metadata→branding→thumbnail→store), branding engine, season-package
+  distribution with temporary/protected links, analytics, runtime settings, publishing.
+- APScheduler jobs: access-link expiry sweep and per-message auto-delete.
+- Interactive admin bot: request flow, live feature-toggle settings panel, queue and
+  analytics views, and the publish-approval workflow.
+- Distribution bots: token-paste generation (encrypted, live without restart), live
+  multi-bot management, and the anime-bot interface with season-package delivery.
+
+### Notes
+- Content acquisition remains authorized-only via the `sources` plugin interface
+  (`LocalFileSource` reference). No pirate-site scraper is included.
