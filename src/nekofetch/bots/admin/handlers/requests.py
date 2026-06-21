@@ -18,27 +18,13 @@ from nekofetch.bots.fsm import FSM
 from nekofetch.core.constants import DIAMOND_FILLED
 from nekofetch.core.container import Container
 from nekofetch.core.exceptions import NekoFetchError
+from nekofetch.core.parsing import parse_episode_spec
 from nekofetch.domain.enums import ContentKind, DownloadScope
 from nekofetch.ui import progress
 from nekofetch.ui.components import cb, keyboard, paginate, parse_cb, section
 
 STATE_NAME = "req:await_name"
 STATE_EPISODES = "req:await_episodes"
-
-
-def _parse_episode_spec(spec: str) -> list[int]:
-    """Parse "1-5, 8, 10" into [1,2,3,4,5,8,10]."""
-    out: set[int] = set()
-    for part in spec.replace(" ", "").split(","):
-        if not part:
-            continue
-        if "-" in part:
-            a, b = part.split("-", 1)
-            if a.isdigit() and b.isdigit():
-                out.update(range(int(a), int(b) + 1))
-        elif part.isdigit():
-            out.add(int(part))
-    return sorted(out)
 
 
 def register(client: Client, container: Container) -> None:
@@ -193,7 +179,7 @@ def register(client: Client, container: Container) -> None:
         await q.answer()
 
     async def _submit_selected(message: Message, data: dict, spec: str) -> None:
-        episodes = _parse_episode_spec(spec)
+        episodes = parse_episode_spec(spec)
         if not episodes:
             await message.reply("Couldn't parse that. Try e.g. 1-12, 14.")
             return
