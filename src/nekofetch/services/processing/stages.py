@@ -107,6 +107,20 @@ class MetadataStage(Stage):
                 ctx.notes.append(f"metadata branding: {', '.join(branding)}")
 
 
+_CORNER_OVERLAY = {
+    "top_left": "10:10",
+    "top_right": "main_w-overlay_w-10:10",
+    "bottom_left": "10:main_h-overlay_h-10",
+    "bottom_right": "main_w-overlay_w-10:main_h-overlay_h-10",
+}
+_CORNER_TEXT = {
+    "top_left": "x=10:y=10",
+    "top_right": "x=w-tw-10:y=10",
+    "bottom_left": "x=10:y=h-th-10",
+    "bottom_right": "x=w-tw-10:y=h-th-10",
+}
+
+
 class BrandingStage(Stage):
     stage = ProcessingStage.BRANDING
 
@@ -114,10 +128,62 @@ class BrandingStage(Stage):
         return self.c.config.processing.branding and self.c.config.branding.enabled
 
     async def process(self, ctx: StageContext) -> None:
-        # Branding here is metadata/caption-level (see BrandingService). Optional video
-        # watermarking is gated separately by watermark.enabled and applied in a full build.
-        if self.c.config.watermark.enabled:
-            ctx.notes.append("watermark: enabled (applied during transcode in full build)")
+        # Branding here is metadata/caption-level (see BrandingService). Video watermarking
+        # is a separate, opt-in stage below.
+        return None
+
+
+class WatermarkStage(Stage):
+    """Optional video watermark overlay (text or image) via ffmpeg.
+
+    Opt-in (``watermark.enabled``) and re-encodes video, so it is off by default. Honors
+    corner, opacity, and scale. Falls back to a note (not a failure) when ffmpeg is missing.
+    """
+
+    stage = ProcessingStage.BRANDING
+
+    def enabled(self) -> bool:
+        return self.c.config.watermark.enabled
+
+    def _filter(self, w) -> tuple[str, list[str]]:
+        """Build the ffmpeg filter and any extra input args for the configured watermark."""
+        if w.type == "image" and w.image_path:
+            pos = _CORNER_OVERLAY.get(w.corner, _CORNER_OVERLAY["bottom_right"])
+            # scale watermark to a fraction of video width, apply opacity, overlay
+            flt = (
+                f"[1:v]format=rgba,colorchannelmixer=aa={w.opacity},"
+                f"scale=iw*{w.scale}:-1[wm];[0:v][wm]overlay={pos}"
+            )
+            return flt, ["-i", w.image_path]
+        # text watermark
+        pos = _CORNER_TEXT.get(w.corner, _CORNER_TEXT["bottom_right"])
+        text = (w.text or "").replace(":", r"\:").replace("'", r"\'")
+        fontsize = "h*" + str(max(w.scale, 0.03))
+        flt = (
+            f"drawtext=text='{text}':fontcolor=white@{w.opacity}:"
+            f"fontsize={fontsize}:{pos}:box=1:boxcolor=black@0.3:boxborderw=6"
+        )
+        return flt, []
+
+    async def process(self, ctx: StageContext) -> None:
+        w = self.c.config.watermark
+        for f in ctx.files:
+            if not f.local_path:
+                continue
+            src = Path(f.local_path)
+            out = src.with_name(src.stem + ".wm" + src.suffix)
+            flt, extra_inputs = self._filter(w)
+            args = ["ffmpeg", "-y", "-i", str(src), *extra_inputs,
+                    "-filter_complex" if extra_inputs else "-vf", flt,
+                    "-c:a", "copy", str(out)]
+            rc, err = await _run(*args)
+            if rc != 0:
+                ctx.notes.append(f"watermark: {err.strip() or 'ffmpeg unavailable'}")
+                continue
+            try:
+                out.replace(src)  # swap in the watermarked file
+            except OSError as exc:
+                ctx.notes.append(f"watermark swap failed: {exc}")
 
 
 class ThumbnailStage(Stage):
@@ -156,6 +222,7 @@ def default_stages(container) -> list[Stage]:
         RenameStage(container),
         MetadataStage(container),
         BrandingStage(container),
+        WatermarkStage(container),
         ThumbnailStage(container),
         StoreStage(container),
     ]
