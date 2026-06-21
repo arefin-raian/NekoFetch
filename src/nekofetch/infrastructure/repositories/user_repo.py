@@ -40,3 +40,10 @@ class UserRepository(BaseRepository[User]):
     async def count(self) -> int:
         result = await self.session.execute(select(func.count()).select_from(User))
         return int(result.scalar_one())
+
+    async def all_telegram_ids(self, *, include_banned: bool = False) -> list[int]:
+        stmt = select(User.telegram_id)
+        if not include_banned:
+            stmt = stmt.where(User.is_banned.is_(False))
+        result = await self.session.execute(stmt)
+        return [row[0] for row in result.all()]

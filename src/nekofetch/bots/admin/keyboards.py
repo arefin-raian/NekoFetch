@@ -29,4 +29,5 @@ def admin_home_keyboard() -> InlineKeyboardMarkup:
         [("▸ Queue", cb("queue", "view", 0)), ("▸ Analytics", cb("admin", "analytics"))],
         [("▸ Staff", cb("admin", "staff")), ("▸ Bots", cb("admin", "bots"))],
         [("▸ Settings", cb("settings", "home")), ("▸ Storage", cb("admin", "storage"))],
+        [("▸ Approvals", cb("approve", "panel")), ("▸ Broadcast", cb("admin", "broadcast"))],
     )

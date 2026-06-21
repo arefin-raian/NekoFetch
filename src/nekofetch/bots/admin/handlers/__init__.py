@@ -13,6 +13,7 @@ from nekofetch.core.container import Container
 
 def register_all(client: Client, container: Container) -> None:
     from nekofetch.bots.admin.handlers import (
+        admin_tools,
         approvals,
         bots_admin,
         requests,
@@ -29,3 +30,4 @@ def register_all(client: Client, container: Container) -> None:
     approvals.register(client, container)
     bots_admin.register(client, container)
     storage_admin.register(client, container)
+    admin_tools.register(client, container)

@@ -19,6 +19,7 @@ from nekofetch.services.auth_service import AuthService
 from nekofetch.ui.components import cb, keyboard
 
 STATE_TOKEN = "bot:await_token"
+STATE_BIND = "bot:await_bind"
 
 
 def register(client: Client, container: Container) -> None:
@@ -39,20 +40,34 @@ def register(client: Client, container: Container) -> None:
 
         await q.answer()
         bots = await BotManagementService(container).list_bots()
+        rows = []
         if bots:
-            lines = "\n".join(
-                f"{DIAMOND_FILLED if b.enabled else DIAMOND_HOLLOW} {b.name}"
-                f" (@{b.username})" if b.username else f" {b.name}"
-                for b in bots
-            )
+            lines = []
+            for b in bots:
+                handle = f" (@{b.username})" if b.username else ""
+                glyph = DIAMOND_FILLED if b.enabled else DIAMOND_HOLLOW
+                lines.append(f"{glyph} {b.name}{handle}")
+                rows.append([(f"Bind title — {b.name[:18]}", cb("botmgr", "bind", b.id))])
+            body = "\n".join(lines)
         else:
-            lines = "No distribution bots yet."
+            body = "No distribution bots yet."
+        rows.append([("➜ Add Bot", cb("botmgr", "add"))])
+        rows.append([("◂ Back", cb("admin", "home"))])
         await q.message.edit_text(
-            f"**▸ Distribution Bots**\n\n{lines}",
-            reply_markup=keyboard(
-                [("➜ Add Bot", cb("botmgr", "add"))],
-                [("◂ Back", cb("admin", "home"))],
-            ),
+            f"**▸ Distribution Bots**\n\n{body}", reply_markup=keyboard(*rows)
+        )
+
+    @client.on_callback_query(filters.regex(r"^botmgr\|bind"))
+    async def _bind(_: Client, q: CallbackQuery) -> None:
+        if not _allowed(q):
+            await q.answer(L("access_denied"), show_alert=True)
+            return
+        bot_id = int(q.data.split("|", 2)[2])
+        await fsm.set(q.from_user.id, STATE_BIND, bot_id=bot_id)
+        await q.answer()
+        await q.message.edit_text(
+            "**Bind Title**\n\nSend the anime reference (slug/id) to bind this bot to, "
+            "or send `-` to unbind. A bound bot opens directly on that title."
         )
 
     @client.on_callback_query(filters.regex(r"^botmgr\|add"))
@@ -72,12 +87,25 @@ def register(client: Client, container: Container) -> None:
     # Separate group so this coexists with the request-flow text handler.
     @client.on_message(filters.text & ~filters.command(["start"]), group=1)
     async def _token(_: Client, message: Message) -> None:
-        state, _ = await fsm.get(message.from_user.id)
-        if state != STATE_TOKEN:
-            return
+        state, data = await fsm.get(message.from_user.id)
         user = getattr(message, "nf_user", None)
+        if state not in (STATE_TOKEN, STATE_BIND):
+            return
         if not (user and auth.has_permission(user, Permission.GENERATE_BOTS)):
             return
+
+        if state == STATE_BIND:
+            await fsm.clear(message.from_user.id)
+            from nekofetch.services.bot_management_service import BotManagementService
+
+            ref = message.text.strip()
+            anime_doc_id = None if ref == "-" else ref
+            await BotManagementService(container).bind_title(int(data["bot_id"]), anime_doc_id)
+            await message.reply(
+                f"{DIAMOND_FILLED} Bot {'unbound' if anime_doc_id is None else f'bound to `{anime_doc_id}`'}."
+            )
+            return
+
         token = message.text.strip()
         await fsm.clear(message.from_user.id)
         from nekofetch.services.bot_management_service import BotManagementService

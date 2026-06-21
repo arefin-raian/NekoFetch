@@ -108,3 +108,14 @@ class BotManagementService:
             rec = await session.get(DistributionBot, bot_id)
             if rec:
                 rec.enabled = enabled
+
+    async def bind_title(self, bot_id: int, anime_doc_id: str | None) -> None:
+        """Bind a distribution bot to a single title (or clear with None).
+
+        A bound bot opens directly on that title's page instead of the catalog.
+        """
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            rec = await session.get(DistributionBot, bot_id)
+            if rec:
+                rec.anime_doc_id = anime_doc_id or None
+        log.info("bot.bound", id=bot_id, anime=anime_doc_id)

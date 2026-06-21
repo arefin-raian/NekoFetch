@@ -53,10 +53,39 @@ def build_distribution_bot(
     # ── entry ──
     @client.on_message(filters.command("start"))
     async def _start(_: Client, message: Message) -> None:
+        if not await _passes_force_sub(message):
+            return
         if record.anime_doc_id:
             await _show_title(message, record.anime_doc_id)
         else:
             await _show_catalog(message)
+
+    async def _passes_force_sub(message: Message) -> bool:
+        from nekofetch.bots.force_sub import channels_to_join, join_keyboard
+
+        pending = await channels_to_join(client, container, message.from_user.id)
+        if not pending:
+            return True
+        await message.reply(
+            "**Join Required**\n\nPlease join the channel(s) below, then tap “I've Joined”.",
+            reply_markup=join_keyboard(pending, retry_callback="fsub|retry"),
+        )
+        return False
+
+    @client.on_callback_query(filters.regex(r"^fsub\|retry"))
+    async def _fsub_retry(_: Client, q: CallbackQuery) -> None:
+        from nekofetch.bots.force_sub import channels_to_join
+
+        pending = await channels_to_join(client, container, q.from_user.id)
+        if pending:
+            await q.answer("Still not subscribed to all channels.", show_alert=True)
+            return
+        await q.answer("Thanks!")
+        await q.message.delete()
+        if record.anime_doc_id:
+            await _show_title(q.message, record.anime_doc_id)
+        else:
+            await _show_catalog(q.message)
 
     async def _show_catalog(message: Message) -> None:
         titles = await dist.published_titles()
