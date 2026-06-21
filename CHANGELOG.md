@@ -48,6 +48,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
   catalog index) refreshed on a scheduler. Key services instrumented to emit events.
 - Config: `storage_channel.*` and `log_channel.*` sections.
 
+- Alembic migrations: async `migrations/env.py` targeting `Base.metadata`, baseline initial
+  revision, and an `AUTO_CREATE_SCHEMA` env toggle (dev auto-create vs. prod migrations).
+- Test suite (pytest) covering parsing, progress, templates, permissions, token cipher,
+  metadata transform/render, and config; GitHub Actions CI (ruff + compile + pytest).
+- Force-subscribe gate on distribution bots (config-driven, with join buttons + recheck).
+- Admin broadcast tool (copies a message to all non-banned users, reports delivered/failed).
+- Per-bot title binding (a distribution bot can open directly on one bound title).
+- Opt-in video watermark processing stage (ffmpeg text/image overlay; corner/opacity/scale).
+
 ### Notes
 - Content acquisition remains authorized-only via the `sources` plugin interface
   (`LocalFileSource` reference). No pirate-site scraper is included.

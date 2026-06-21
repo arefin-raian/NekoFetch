@@ -6,16 +6,18 @@
 
 - (none) — v0.1 milestone complete.
 
-## Pending
+## Pending (operator actions — need real credentials/infra)
 
 - **Implement `scraper.py`** — operator fills the four `fetch_*` methods against an
   authorized source and sets `implemented = True` (see `docs/SCRAPER_GUIDE.md`).
 - **Configure channels** — set `storage_channel`/`log_channel` ids, make the admin bot an
   admin of both, set the end-sticker file_id; then enable.
-- Alembic migrations (dev currently uses `create_all`).
-- Optional polish: video watermarking transcode, force-subscribe gate, broadcast tool,
-  per-bot binding of a single title in the generation flow, richer analytics windows.
-- Test suite (pytest) and CI.
+- **Run a live smoke test** — real Telegram API creds + Postgres/Mongo/Redis up
+  (`docker compose up`), then exercise the request→download→publish→deliver loop.
+
+## Nice-to-have (future)
+
+- Richer analytics windows (active-user time windows), staff-management UI, more languages.
 
 ## Completed
 
@@ -45,3 +47,7 @@
   distribution delivery via packs with fallback.
 - Log channel: `LogChannelService` (all-event sink + two auto-updated pinned messages),
   scheduler refresh, instrumentation across services.
+- Alembic migrations (async env + baseline) + `AUTO_CREATE_SCHEMA` toggle.
+- Test suite (pytest) + GitHub Actions CI (ruff + compile + pytest).
+- Force-subscribe gate, admin broadcast tool, per-bot title binding.
+- Opt-in ffmpeg watermark processing stage.

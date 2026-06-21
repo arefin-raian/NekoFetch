@@ -76,6 +76,31 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 - Distribution: bot generation flow + anime-bot interface + season-package delivery
   (protected/temporary links + auto-delete via APScheduler).
 
+### Session 1 (cont.) — Migrations, CI, force-sub, broadcast, binding, watermark
+
+**Completed** ("do whatever's left" — cleared the buildable backlog)
+
+- **Alembic**: async `migrations/env.py` (targets `Base.metadata`, DSN from EnvSettings),
+  `alembic.ini`, script template, baseline `0001_initial` (materializes metadata).
+  Added `AUTO_CREATE_SCHEMA` env toggle; container's `create_all` now guarded by it.
+- **Tests + CI**: extracted `core/parsing.py` (testable); pytest suite (parsing, progress,
+  templates, permissions, cipher, metadata transform/render, config). GitHub Actions CI
+  (ruff non-blocking + compileall + pytest). Verified pure tests pass locally.
+- **Force-subscribe**: `bots/force_sub.py` gate on distribution `/start` (join buttons +
+  "I've Joined" recheck), config-driven.
+- **Broadcast**: admin tool copying a message to all non-banned users with a delivered/
+  failed report; `UserRepository.all_telegram_ids`.
+- **Per-bot binding**: `BotManagementService.bind_title` + bind action in the bots panel;
+  bound bots open directly on their title.
+- **Watermark**: opt-in `WatermarkStage` (ffmpeg text/image overlay, corner/opacity/scale),
+  added to the pipeline; degrades to a note when ffmpeg is missing.
+- Verified clean compile across the tree.
+
+**Current state**
+
+- Buildable backlog cleared. Remaining items are operator actions needing real
+  credentials/infra: implement `scraper.py`, configure the channels, and run a live smoke test.
+
 ### Session 1 (cont.) — Database channel + log channel
 
 **Completed**

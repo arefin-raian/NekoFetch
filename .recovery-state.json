@@ -1,9 +1,9 @@
 {
   "project": "NekoFetch",
-  "current_task": "Database channel + log channel complete",
+  "current_task": "Buildable backlog cleared (migrations, CI, force-sub, broadcast, binding, watermark)",
   "status": "milestone-complete",
-  "last_modified": "2026-06-21T22:30:00",
-  "phase": "v0.1-plus-channels",
+  "last_modified": "2026-06-21T23:30:00",
+  "phase": "v0.2-feature-complete",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",
@@ -19,14 +19,16 @@
     "Local git + push to GitHub (public)",
     "Metadata enrichment seam: providers/metadata (models/base/scraper placeholder/transformer/renderer) + EnrichmentService + distribution consumption + docs/SCRAPER_GUIDE.md",
     "Database (storage) channel: StoragePack model + StorageChannelService (assisted index + auto upload + range delivery) + admin storage panel + distribution delivery via packs",
-    "Log channel: LogChannelService (all-event sink + 2 pinned auto-updated messages) + scheduler refresh + instrumentation across services"
+    "Log channel: LogChannelService (all-event sink + 2 pinned auto-updated messages) + scheduler refresh + instrumentation across services",
+    "Alembic migrations (async env + baseline) + AUTO_CREATE_SCHEMA toggle",
+    "Test suite (pytest) + GitHub Actions CI",
+    "Force-subscribe gate + admin broadcast tool + per-bot title binding",
+    "Opt-in ffmpeg watermark processing stage"
   ],
   "next_tasks": [
     "User implements scraper.py fetch_* methods against an authorized source and sets implemented=True",
     "Configure storage_channel/log_channel ids + make admin bot an admin of both + set end-sticker file_id, then enable",
-    "Alembic migrations",
-    "Test suite + CI",
-    "Optional polish: watermark transcode, force-subscribe, broadcast, per-bot title binding"
+    "Live smoke test with real Telegram creds + Postgres/Mongo/Redis up"
   ],
   "channels": {
     "storage": {"enabled_default": false, "model": "StoragePack", "service": "StorageChannelService", "delimited_packs": "header->files->end_sticker", "key": "anime+season+resolution+audio"},
