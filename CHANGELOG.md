@@ -7,6 +7,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
 ## [Unreleased]
 
 ### Added
+- `LICENSE` (MIT + Acceptable Use Notice) and Mermaid architecture/data-flow diagrams in the README.
 - Documentation backbone: `README.md`, `docs/ARCHITECTURE.md`, `docs/PROJECT_JOURNAL.md`,
   `docs/TASKS.md`, this changelog.
 - Project scope and authorized-only content-acquisition policy.

@@ -8,6 +8,7 @@
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Async](https://img.shields.io/badge/architecture-async--first-success)
 ![Telegram](https://img.shields.io/badge/Telegram-Pyrogram-26A5E4)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 </div>
 
@@ -132,42 +133,39 @@ minimal emoji.
 NekoFetch follows **clean architecture**: dependencies point inward. The domain layer is
 pure; outer layers depend on inner ones, never the reverse.
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │                   bots/                      │  Telegram I/O
-                    │   admin bot  ·  distribution bots  ·  manager │  (Pyrogram)
-                    └───────────────┬──────────────┬──────────────┘
-                                    │              │
-                    ┌───────────────▼──────┐  ┌────▼──────────────┐
-                    │        ui/           │  │   localization/   │  Presentation
-                    │ progress·templates·  │  │   i18n (en.json)  │
-                    │ components·pagination│  └───────────────────┘
-                    └───────────┬──────────┘
-                                │
-                    ┌───────────▼──────────────────────────────────┐
-                    │                 services/                     │  Business logic
-                    │ auth·request·queue·download·processing·       │
-                    │ distribution·branding·publishing·analytics·   │
-                    │ storage_channel·log/main/index channel·       │
-                    │ access·staff·settings·bot_management          │
-                    └───────┬───────────────────────┬──────────────┘
-                            │                        │
-            ┌───────────────▼─────────┐   ┌──────────▼───────────────┐
-            │       sources/          │   │       providers/         │  Pluggable seams
-            │  AnimeSource (auth-only)│   │  metadata · shortlink    │  (you implement)
-            └───────────────┬─────────┘   └──────────┬───────────────┘
-                            │                        │
-                    ┌───────▼────────────────────────▼──────────────┐
-                    │              infrastructure/                   │  I/O adapters
-                    │  postgres (SQLAlchemy) · mongo (Motor) ·       │
-                    │  redis · repositories · scheduler              │
-                    └───────────────┬───────────────────────────────┘
-                                    │
-                    ┌───────────────▼───────────────┐    ┌──────────────────┐
-                    │            domain/             │    │      core/       │
-                    │  enums · entities (pure)       │    │ config·logging·  │
-                    └───────────────────────────────┘    │ DI·security      │
-                                                         └──────────────────┘
+```mermaid
+flowchart TD
+    subgraph PRES["Presentation"]
+        BOTS["bots/ — admin · distribution · manager · middleware"]
+        UI["ui/ — progress · templates · components · pagination<br/>+ localization/ (i18n)"]
+    end
+    subgraph LOGIC["services/ — business logic"]
+        SVC["auth · request · queue · download · processing<br/>distribution · branding · publishing · analytics<br/>storage/log/main/index channel · access · staff · settings · bot_management"]
+    end
+    subgraph SEAMS["Pluggable seams — you implement"]
+        SRC["sources/ — AnimeSource (authorized-only)"]
+        PROV["providers/ — metadata · shortlink"]
+    end
+    subgraph INFRA["infrastructure/ — I/O adapters"]
+        DB["postgres (SQLAlchemy) · mongo (Motor) · redis<br/>repositories · scheduler"]
+    end
+    subgraph FOUND["Foundation"]
+        DOMAIN["domain/ — enums · entities (pure)"]
+        CORE["core/ — config · logging · DI · security"]
+    end
+
+    BOTS --> UI --> SVC
+    SVC --> SRC
+    SVC --> PROV
+    SVC --> DB
+    SRC --> DB
+    PROV --> DB
+    SVC --> DOMAIN
+    DB --> DOMAIN
+    SVC -. wired by .-> CORE
+
+    classDef seam fill:#1f6feb22,stroke:#1f6feb;
+    class SRC,PROV seam;
 ```
 
 **Dependency rule:** `bots/ui → services → repositories/providers/sources → infrastructure`.
@@ -242,39 +240,24 @@ NekoFetch/
 
 This is the full lifecycle of a title, from request to a user's chat:
 
-```
-  USER / ADMIN
-      │  request an anime  (or admin adds it)
-      ▼
-  ┌─────────────┐   approve    ┌──────────────────────────────────────────┐
-  │  Requests   │ ───────────▶ │  Download queue → DownloadWorker          │
-  └─────────────┘              │  fans out the ACQUISITION MATRIX:         │
-                               │  {360,540,720,1080} × {English, Japanese} │  English subs only
-                               │  resumable, live progress → Redis         │
-                               └───────────────────┬──────────────────────┘
-                                                   ▼
-                        ┌──────────────────────────────────────────────┐
-                        │  Processing pipeline (per toggles)            │
-                        │  verify → rename → metadata → branding →      │
-                        │  watermark → thumbnail → store                │
-                        └───────────────────┬──────────────────────────┘
-                                            ▼
-                              ┌───────────────────────────┐
-                              │   Admin APPROVAL panel     │   Publish / Reprocess / Cancel
-                              └─────────────┬─────────────┘
-                                            ▼  publish
-       ┌───────────────────────────────────────────────────────────────────────┐
-       │  • Upload packs to the DATABASE CHANNEL (header → files → end sticker)  │
-       │    one pack per (anime, season, resolution, language)                  │
-       │  • Post a card to the MAIN CHANNEL  [Index] [Download]                  │
-       │  • Update the INDEX CHANNEL (per-letter entry)                          │
-       │  • Auto-brand & launch the bound DISTRIBUTION BOT                       │
-       │  • Stream events to the LOG CHANNEL                                     │
-       └───────────────────────────────────┬───────────────────────────────────┘
-                                            ▼
-  USER taps Download → opens the bot → force-subscribe → ACCESS check (trial/token)
-      → Season → Quality → Language → bot copies the season pack to their chat
-      → "forward to Saved Messages" hint → optional auto-delete after N minutes
+```mermaid
+flowchart TD
+    A([User / Admin requests an anime]) --> B{Admin approves?}
+    B -->|yes| C["Download queue → DownloadWorker<br/>ACQUISITION MATRIX: 360/540/720/1080 × English/Japanese<br/>English subs only · resumable · live progress → Redis"]
+    C --> D["Processing pipeline (per toggles)<br/>verify → rename → metadata → branding → watermark → thumbnail → store"]
+    D --> E{Admin approval panel}
+    E -->|Publish| F["Upload packs to the DATABASE CHANNEL<br/>header → files → end sticker · one pack per (anime, season, resolution, language)"]
+    F --> G["Post card to MAIN CHANNEL — [Index] [Download]"]
+    F --> H["Update INDEX CHANNEL (per-letter entry)"]
+    F --> I["Auto-brand & launch bound DISTRIBUTION BOT"]
+    F --> J["Stream events to LOG CHANNEL"]
+    G --> K([User taps Download → opens bot])
+    K --> L{Force-subscribe + ACCESS check<br/>trial / token}
+    L -->|granted| M["Season → Quality → Language"]
+    M --> N["Bot copies the season pack to the user's chat<br/>+ 'forward to Saved Messages' hint + optional auto-delete"]
+    E -->|Reprocess / Cancel| D
+    L -->|expired| O["Get Access → shortlink token → renew"]
+    O --> L
 ```
 
 Every step is independently toggleable and configurable.
@@ -644,9 +627,10 @@ pytest on every push and PR.
 
 ## License & Responsibility
 
-NekoFetch is provided **as-is**, with **no warranty**. It is a neutral distribution platform:
-it ships no content, no pirate-site scrapers, and no metadata source — those are seams **you**
-implement.
+Licensed under the **[MIT License](LICENSE)**. NekoFetch is provided **as-is**, with **no
+warranty**. It is a neutral distribution platform: it ships no content, no pirate-site
+scrapers, and no metadata source — those are seams **you** implement. The `LICENSE` file also
+carries an **Acceptable Use Notice**.
 
 **You are solely responsible** for the legality of the content you ingest and distribute, and
 for complying with the terms of any source, API, or service you connect. Use it only with
