@@ -1,0 +1,26 @@
+{
+  "project": "NekoFetch",
+  "current_task": "Admin/distribution bot handlers + GitHub",
+  "status": "in_progress",
+  "last_modified": "2026-06-21T19:50:00",
+  "phase": "service-layer-complete",
+  "completed_tasks": [
+    "Foundation: docs, config, structure, Docker",
+    "Core: config/logging/DI/security/exceptions",
+    "Domain + database layer (Postgres/Mongo/Redis + repositories)",
+    "Authorized-source interface + LocalFileSource",
+    "Premium UX kit (progress/templates/i18n/components)",
+    "Auth service + bot middleware",
+    "Multi-bot manager + admin welcome screen + distribution skeleton",
+    "Service layer: request, queue, download worker, processing pipeline (verify/rename/metadata/branding/thumbnail/store), branding engine, distribution (season packages + temp links), analytics",
+    "Scheduler (link-expiry sweep) + worker wired into bot manager"
+  ],
+  "next_tasks": [
+    "Admin bot: request flow handlers (search->results->content->scope->submit), settings panel, queue/analytics views, publish-approval panel",
+    "Distribution: bot generation flow + rich anime-bot interface + season-package delivery handlers + auto-delete",
+    "Alembic migrations",
+    "GitHub integration (pending operator confirmation to publish externally)"
+  ],
+  "verification": "python -m compileall src passes",
+  "notes": "Authorized-only content policy. No pirate-site scrapers. python -m nekofetch boots admin bot /start welcome."
+}

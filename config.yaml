@@ -1,0 +1,104 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NekoFetch — application configuration
+# Feature toggles & behaviour. Editable here or, at runtime, via the admin panel
+# (runtime overrides are stored in MongoDB and take precedence over this file).
+# Secrets belong in .env, not here.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Master feature switches — turn whole subsystems on/off instantly.
+features:
+  request_system: true
+  download_queue: true
+  distribution_bots: true
+  watermarking: false
+  metadata_editing: true
+  thumbnail_generation: true
+  auto_delete: false
+  temporary_links: true
+  analytics: true
+  audit_logs: true
+
+downloads:
+  concurrent_downloads: 5
+  retry_attempts: 3
+  retry_backoff_seconds: 10
+  resume_interrupted: true
+  chunk_size_kb: 1024
+  progress_update_interval_seconds: 3
+
+processing:
+  # Pipeline stages, each independently toggleable.
+  verify_files: true
+  rename: true
+  metadata: true
+  branding: true
+  thumbnail: true
+  require_approval_before_publish: true
+
+rename:
+  enabled: true
+  # Variables: {title} {season} {episode} {resolution} {audio} {source} {group}
+  template: "{title} S{season}E{episode} [{resolution}] [{audio}] - {group}"
+
+metadata:
+  enabled: true
+  update_title: true
+  update_author: true
+  update_comment: true
+  update_tags: true
+  update_description: true
+  supported_containers: [mkv, mp4, avi, mov]
+
+thumbnail:
+  enabled: true
+  attach_to_video: true
+  attach_to_document: true
+  generate_previews: true
+
+watermark:
+  enabled: false
+  type: text            # text | image
+  text: "Anime Weebs"
+  image_path: ""
+  corner: bottom_right  # top_left | top_right | bottom_left | bottom_right
+  opacity: 0.6
+  scale: 0.12
+
+branding:
+  enabled: true
+  channel_name: "Anime Weebs"
+  footer_text: "Anime Weebs"
+  website: ""
+  telegram_channel: ""
+  community_link: ""
+  watermark_text: "Anime Weebs"
+  metadata_author: "Anime Weebs"
+  metadata_comment: "Provided by Anime Weebs"
+
+distribution:
+  # Season-centric delivery by default.
+  mode: season_package           # season_package | individual
+  protect_content: true
+  temporary_links: true
+  link_expiry_minutes: 60         # 15 | 30 | 60 | 360 | 1440
+  auto_delete: false
+  auto_delete_after_minutes: 60
+
+queue:
+  max_visible: 10
+  position_recalc_seconds: 5
+
+security:
+  rate_limit_per_minute: 20
+  anti_spam_cooldown_seconds: 2
+  force_subscribe: false
+  force_subscribe_channels: []
+
+sources:
+  # Only authorized sources are enabled. Pirate-site plugins are not shipped.
+  enabled: [local]
+  default: local
+
+localization:
+  default_language: en
+  directory: resources/language

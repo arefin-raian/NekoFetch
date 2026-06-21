@@ -1,0 +1,25 @@
+# Environment & secrets
+.env
+*.session
+*.session-journal
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Data & media
+/data/
+storage/
+sessions/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
