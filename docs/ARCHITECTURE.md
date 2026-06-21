@@ -137,7 +137,33 @@ access token when no pack exists. Header text and the end sticker are configurab
 (`storage_channel.*`), with template variables `{title}{season}{resolution}{language}
 {episode_from}{episode_to}{group}`.
 
-## 8. Access control
+## 7c. Publishing surfaces & acquisition matrix
+
+**Main channel** — on publish, `MainChannelService` posts each anime (poster + templated
+caption: episodes/quality/language/genre/overview) with **[Index][Download]** buttons.
+Download deep-links to the bound distribution bot (`/start anime_<doc_id>`); Index links to
+the index-channel letter post. Posts are tracked in `ChannelPost` and edited in place.
+
+**Index channel** — `IndexChannelService` maintains one message per first letter (edited in
+place) listing titles. The Display follows the operator's stylized template.
+
+**Acquisition matrix** — a request that doesn't pin a quality/language fans out across
+`acquisition.resolutions × {english=Dub, japanese=Sub}` with **English subtitles enforced**;
+each downloaded file is tagged per combo, so `StoragePack`s build per quality/language and
+the public bot offers exactly what exists.
+
+## 8. Access control & monetization gate
+
+Two layers:
+
+- **Roles/permissions** (staff/admin) gate the admin surface (see below).
+- **Time-based access** (`AccessService`, opt-in via `access.enabled`) gates public file
+  delivery: a free trial on first contact, then renewal via a **shortlink token**. The
+  shortener is a pluggable seam (`providers/shortlink/`, Linkvertise adapter built in);
+  `generate_token` wraps a `/start token_<t>` deep link, and redeeming it extends
+  `User.access_until` by `token_days`. Delivery checks `has_access` first.
+
+### Role-based access (admin surface)
 
 Roles: `user`, `staff`, `admin` (extensible). Permissions are role-derived and checked in a
 Pyrogram middleware before any handler runs. Admin whitelist seeded from `.env`. All privileged

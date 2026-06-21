@@ -59,6 +59,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
 - Staff & user management: `StaffService` (promote/demote, ban/unban, approve) with audit
   logging + log-channel events, and an admin staff panel wired to the Staff button.
 - `docs/DEPLOYMENT.md` — end-to-end first-run and channel setup guide.
+- **Main channel publishing**: on publish, post each anime to a public main channel
+  (poster + `⌬ EPISODES/QUALITY/LANGUAGE/GENRE` caption + overview) with **[Index][Download]**
+  buttons; Download deep-links to the bound bot (`/start anime_<id>`). `ChannelPost` model,
+  `main_channel.*` config.
+- **Index channel**: bot maintains stylized per-letter index posts (`IndexChannelService`),
+  edited in place; the main-channel Index button links to the relevant letter post.
+- **Multi-quality × language acquisition**: a request with no pinned quality/language fans
+  out into the configured matrix (resolutions × english/japanese = dub/sub), English subs
+  enforced; files tagged per combo so packs build per quality/language. `acquisition.*` config.
+- **Bot auto-branding**: binding a bot to a title auto-sets its name/about/description from
+  the title's facts (best-effort, version-tolerant). **Pending-bot queue**: admin sees titles
+  that have content but no bot yet; content work never blocks on tokens.
+- **Access/token system**: per-user free trial then renewal via a shortlink token, gating
+  delivery (`AccessService`, `access.*`). Pluggable shortlink seam (`providers/shortlink/`)
+  with a **Linkvertise** adapter. Deep-link token redemption (`/start token_<t>`). Plus a
+  "forward to Saved Messages" hint and the auto-delete window note on delivery.
 
 ### Notes
 - Content acquisition remains authorized-only via the `sources` plugin interface

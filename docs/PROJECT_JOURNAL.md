@@ -76,6 +76,30 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 - Distribution: bot generation flow + anime-bot interface + season-package delivery
   (protected/temporary links + auto-delete via APScheduler).
 
+### Session 2 — Workflow build-out (main channel, acquisition, branding, access)
+
+Gap-analyzed the operator's full intended workflow vs. the codebase, then built the deltas
+in four phases (all gated/disabled by default, clean compile):
+
+- **Phase A — main + index channel.** `MainChannelService` posts each published anime
+  (poster + templated caption with `⌬ EPISODES/QUALITY/LANGUAGE/GENRE` + overview) with
+  [Index][Download] buttons; Download deep-links to the bound bot (`/start anime_<id>`).
+  `IndexChannelService` maintains stylized per-letter index posts. `ChannelPost` model +
+  `main_channel`/`index_channel` config.
+- **Phase B — acquisition matrix.** Download worker fans a request with no pinned
+  quality/language into `acquisition.resolutions × {english=Dub, japanese=Sub}`, English
+  subs enforced, tagging files per combo. `acquisition` config.
+- **Phase C — bot auto-branding + pending queue.** Binding auto-sets the bot's
+  name/about/description (best-effort) and refreshes the main-channel post; admin sees titles
+  with content but no bot yet. (Profile photo remains a BotFather step.)
+- **Phase D — access/token system.** `AccessService`: free trial → renewal via shortlink
+  token → gated delivery; `User.access_until` + `AccessToken` model. Pluggable
+  `providers/shortlink/` seam with a Linkvertise adapter. Deep-link redemption
+  (`/start token_<t>`), forward-to-Saved hint, auto-delete window note.
+
+Languages reconciled to the existing audio model: English=Dub, Japanese=Sub (English subs).
+Pushed across commits c6100cc, 8ebcacd, + Phase D.
+
 ### Session 1 (cont.) — Staff management UI + deployment guide
 
 **Completed**

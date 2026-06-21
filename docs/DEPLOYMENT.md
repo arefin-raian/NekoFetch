@@ -151,6 +151,50 @@ temporary links, and auto-delete.
 
 ---
 
+## 8b. Main channel + index channel
+
+1. Create a **main channel** (public, so the Index/Download links work) and add the admin
+   bot as an administrator.
+2. (Optional) Create an **index channel** and add the bot as admin — it maintains stylized
+   per-letter index posts.
+3. In `config.yaml`:
+   ```yaml
+   main_channel:
+     enabled: true
+     channel_id: -100XXXXXXXXXX
+     # caption_template uses {title}{tag}{episodes}{qualities}{languages}{genres}{overview}
+   index_channel:
+     enabled: true
+     channel_id: -100ZZZZZZZZZZ
+   ```
+4. On **Publish**, each anime is posted to the main channel (poster + caption + **[Index]
+   [Download]**); Download deep-links to the title's bot, Index to its letter post.
+
+## 8c. Access / token system (Linkvertise)
+
+1. In `config.yaml`:
+   ```yaml
+   access:
+     enabled: true
+     trial_days: 3
+     token_days: 3
+   shortlink:
+     enabled: true
+     provider: linkvertise
+     linkvertise_user_id: "YOUR_PUBLISHER_ID"
+   ```
+2. New users get a `trial_days` free window. When it lapses, the bot shows **Get Access** →
+   generates a Linkvertise link → after completing it the user returns via
+   `/start token_…` and gets `+token_days`.
+3. To use a different shortener, implement `providers/shortlink/<provider>.py` and set
+   `shortlink.provider`.
+
+## 8d. Acquisition matrix
+
+`acquisition.resolutions` × `languages` (`english`=Dub, `japanese`=Sub, English subs
+enforced) is fetched automatically when a request doesn't pin a specific quality/language.
+Tune the lists in `config.yaml`.
+
 ## 9. Metadata enrichment (optional)
 
 To show rich anime info cards (synopsis, genres, stats, characters, artwork), implement the

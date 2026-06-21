@@ -53,3 +53,7 @@
 - Opt-in ffmpeg watermark processing stage.
 - Staff & user management UI (promote/demote, ban/unban, approve) with audit logging.
 - `docs/DEPLOYMENT.md` first-run + channel setup guide.
+- Main + index channel publishing ([Index][Download], deep links, per-letter index posts).
+- Multi-quality × language acquisition matrix (English subs enforced).
+- Bot auto-branding on bind + pending-bot queue.
+- Access/token system (trial + Linkvertise shortlink renewal) gating delivery; forward-to-saved hint.

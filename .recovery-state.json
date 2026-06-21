@@ -1,9 +1,9 @@
 {
   "project": "NekoFetch",
-  "current_task": "Staff management UI + deployment guide complete",
+  "current_task": "Workflow build-out (main channel, acquisition, branding, access)",
   "status": "milestone-complete",
-  "last_modified": "2026-06-22T00:15:00",
-  "phase": "v0.2-feature-complete",
+  "last_modified": "2026-06-22T02:00:00",
+  "phase": "v0.3-workflow-complete",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",
@@ -25,7 +25,11 @@
     "Force-subscribe gate + admin broadcast tool + per-bot title binding",
     "Opt-in ffmpeg watermark processing stage",
     "Staff & user management UI (promote/demote, ban/unban, approve) + audit logging",
-    "docs/DEPLOYMENT.md first-run + channel setup guide"
+    "docs/DEPLOYMENT.md first-run + channel setup guide",
+    "Main + index channel publishing (poster + caption + Index/Download deep links)",
+    "Multi-quality x language acquisition matrix (English subs enforced)",
+    "Bot auto-branding on bind + pending-bot queue",
+    "Access/token system (trial + Linkvertise shortlink renewal) gating delivery"
   ],
   "next_tasks": [
     "User implements scraper.py fetch_* methods against an authorized source and sets implemented=True",
