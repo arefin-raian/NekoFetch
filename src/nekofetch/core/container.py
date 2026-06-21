@@ -80,6 +80,11 @@ class Container:
         self.redis = Redis.from_url(self.env.redis_url, decode_responses=True)
         self.progress = ProgressStore(self.redis)
 
+        # Apply persisted runtime overrides (admin settings panel) over config.yaml.
+        from nekofetch.services.settings_service import SettingsService
+
+        await SettingsService(self).apply_overrides()
+
         # Activate only authorized sources listed in config.
         self.sources.activate(self.config.sources.enabled)
 
