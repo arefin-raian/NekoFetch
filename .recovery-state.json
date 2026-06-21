@@ -1,9 +1,9 @@
 {
   "project": "NekoFetch",
-  "current_task": "Metadata enrichment seam complete",
+  "current_task": "Database channel + log channel complete",
   "status": "milestone-complete",
-  "last_modified": "2026-06-21T21:30:00",
-  "phase": "v0.1-plus-enrichment-seam",
+  "last_modified": "2026-06-21T22:30:00",
+  "phase": "v0.1-plus-channels",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",
@@ -17,14 +17,21 @@
     "Admin bot: request flow, settings panel, queue/analytics, approval panel",
     "Distribution bots: generation, live multi-bot add, anime-bot interface, season-package delivery",
     "Local git + push to GitHub (public)",
-    "Metadata enrichment seam: providers/metadata (models/base/scraper placeholder/transformer/renderer) + EnrichmentService + distribution consumption + docs/SCRAPER_GUIDE.md"
+    "Metadata enrichment seam: providers/metadata (models/base/scraper placeholder/transformer/renderer) + EnrichmentService + distribution consumption + docs/SCRAPER_GUIDE.md",
+    "Database (storage) channel: StoragePack model + StorageChannelService (assisted index + auto upload + range delivery) + admin storage panel + distribution delivery via packs",
+    "Log channel: LogChannelService (all-event sink + 2 pinned auto-updated messages) + scheduler refresh + instrumentation across services"
   ],
   "next_tasks": [
     "User implements scraper.py fetch_* methods against an authorized source and sets implemented=True",
+    "Configure storage_channel/log_channel ids + make admin bot an admin of both + set end-sticker file_id, then enable",
     "Alembic migrations",
     "Test suite + CI",
     "Optional polish: watermark transcode, force-subscribe, broadcast, per-bot title binding"
   ],
+  "channels": {
+    "storage": {"enabled_default": false, "model": "StoragePack", "service": "StorageChannelService", "delimited_packs": "header->files->end_sticker", "key": "anime+season+resolution+audio"},
+    "log": {"enabled_default": false, "service": "LogChannelService", "pinned": ["stats_dashboard", "catalog_index"], "routing": "single channel, all events"}
+  },
   "scraper_seam": {
     "file_to_edit": "src/nekofetch/providers/metadata/scraper.py",
     "functions": ["fetch_profile_data", "fetch_character_data", "fetch_statistics", "fetch_assets"],

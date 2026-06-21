@@ -10,6 +10,8 @@
 
 - **Implement `scraper.py`** — operator fills the four `fetch_*` methods against an
   authorized source and sets `implemented = True` (see `docs/SCRAPER_GUIDE.md`).
+- **Configure channels** — set `storage_channel`/`log_channel` ids, make the admin bot an
+  admin of both, set the end-sticker file_id; then enable.
 - Alembic migrations (dev currently uses `create_all`).
 - Optional polish: video watermarking transcode, force-subscribe gate, broadcast tool,
   per-bot binding of a single title in the generation flow, richer analytics windows.
@@ -38,3 +40,8 @@
 - Metadata enrichment seam: isolated `providers/metadata/` (models, provider interface,
   single editable `scraper.py` placeholder, transformer, renderer), `EnrichmentService`
   (Mongo-cached), distribution-bot consumption with fallback, and `docs/SCRAPER_GUIDE.md`.
+- Database (storage) channel: `StoragePack` model + `StorageChannelService` (assisted
+  indexing + automated upload + range delivery), admin storage panel/indexing flow,
+  distribution delivery via packs with fallback.
+- Log channel: `LogChannelService` (all-event sink + two auto-updated pinned messages),
+  scheduler refresh, instrumentation across services.

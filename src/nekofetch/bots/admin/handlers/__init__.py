@@ -18,6 +18,7 @@ def register_all(client: Client, container: Container) -> None:
         requests,
         settings,
         start,
+        storage_admin,
     )
     from nekofetch.bots.middleware import install_auth_middleware
 
@@ -27,3 +28,4 @@ def register_all(client: Client, container: Container) -> None:
     settings.register(client, container)
     approvals.register(client, container)
     bots_admin.register(client, container)
+    storage_admin.register(client, container)

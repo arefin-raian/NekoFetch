@@ -76,6 +76,37 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 - Distribution: bot generation flow + anime-bot interface + season-package delivery
   (protected/temporary links + auto-delete via APScheduler).
 
+### Session 1 (cont.) — Database channel + log channel
+
+**Completed**
+
+- **Database (storage) channel.** New `StoragePack` ORM model (channel message range per
+  anime/season/resolution/language). `StorageChannelService` with: assisted indexing
+  (admin supplies `start_id..end_id`; enumerates the range, keeps media as ordered files),
+  automated upload on publish (header → files → end sticker → record range), and range
+  delivery (copy to user, protect/auto-delete aware). Distribution delivery now prefers a
+  stored pack and falls back to a temporary token. Admin storage panel + indexing flow.
+- **Log channel.** `LogChannelService.event()` posts all lifecycle/admin/delivery events to
+  one configurable channel (fire-and-forget, never raises). Two pinned messages
+  (live stats dashboard + catalog index) created on startup and refreshed on a scheduler;
+  message ids cached in Redis. Instrumented request submit, queue, download complete/fail,
+  processing, publish, bot registration, setting changes, delivery.
+- Config sections `storage_channel.*` and `log_channel.*` (in `config.py` + `config.yaml`).
+- Decisions: single channel with delimited packs; both ingestion paths; two pinned messages;
+  one log channel for everything. Resolves ARCHITECTURE §10 batch-delivery.
+- Verified clean compile.
+
+**Current state**
+
+- Both channel subsystems are implemented and wired but ship **disabled** (`enabled: false`,
+  `channel_id: 0`). To enable: set the channel ids, make the admin bot an administrator of
+  both channels, and (for storage) set the end sticker file_id.
+
+**Known issues / open questions**
+
+- Assisted indexing relies on the bot reading the channel range by message id (admin bot
+  must be a channel admin). Verified by compile only; needs a live channel to exercise.
+
 ### Session 1 (cont.) — Metadata enrichment seam (single-file scraper)
 
 **Completed**

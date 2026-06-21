@@ -109,6 +109,34 @@ Season-centric delivery. A user selects a season → resolution → language; th
 indexed file delivery, protected content, and **temporary/expiring access links** with optional
 **auto-delete** — all configurable. Expiry and deletion are driven by APScheduler jobs.
 
+## 7b. Database (storage) channel — resolves the §10 batch-delivery decision
+
+Content is stored in a single Telegram **database channel** as ordered packs, mirroring the
+file-sharing-bot range pattern:
+
+```
+header text  ->  file 1, 2, 3 ... N  ->  end sticker     (per anime/season/resolution/language)
+```
+
+Each pack is recorded as a `StoragePack` (Postgres): `channel_id`, `header_message_id`,
+`start_message_id`, `end_message_id`, the ordered `file_message_ids`, and `file_count`.
+A pack is unique per `(anime_doc_id, season, resolution, audio)`.
+
+`StorageChannelService` provides three operations (all via the admin client, which must
+administer the channel):
+
+- **index_pack** — *assisted ingestion*: record a range you posted manually (admin gives
+  `start_id..end_id`; the service enumerates the range and keeps the media as the file list).
+- **upload_pack** — *automated ingestion*: on publish, post the header, upload files in
+  order, post the end sticker, and record the range.
+- **deliver** — copy a pack's messages to a user (honors `protect_content`; header/sticker
+  inclusion configurable). The caller schedules auto-delete of the copied messages.
+
+Distribution delivery prefers a stored pack (direct copy) and falls back to a temporary
+access token when no pack exists. Header text and the end sticker are configurable
+(`storage_channel.*`), with template variables `{title}{season}{resolution}{language}
+{episode_from}{episode_to}{group}`.
+
 ## 8. Access control
 
 Roles: `user`, `staff`, `admin` (extensible). Permissions are role-derived and checked in a
@@ -121,8 +149,26 @@ actions write to `audit_logs`. Rate limiting and anti-spam enforced via Redis co
 single process/event loop. Bots are registered by token (encrypted at rest), and content is
 deployed to them automatically once published.
 
+## 9b. Observability — log channel
+
+A single configurable **log channel** receives every notable event via
+`LogChannelService.event(category, action, **fields)` — requests, queue, downloads,
+processing, publishing, deliveries, bot registration, admin/setting changes, errors.
+`event()` is fire-and-forget and never raises into its caller (logging must not break the
+operation it records). Categories: `request, queue, download, processing, publish,
+delivery, admin, bot, error, system`; `events: [all]` forwards everything.
+
+Two **pinned messages** are maintained in place (edited, not reposted) on a scheduler
+(`refresh_seconds`): a **live stats dashboard** (users, downloads, queue, failures,
+published) and a **catalog index** (published anime → seasons). Their message ids are
+cached in Redis so they survive restarts.
+
+This complements the durable `audit_logs` / `analytics_events` Postgres tables — the
+channel is the human-facing live feed; the tables are the queryable record.
+
 ## 10. Open decisions
 
-- [ ] Final batch-delivery mechanism (indexed channel vs. stored-message forwarding).
+- [x] Batch-delivery mechanism — **resolved**: single database channel with message-range
+  packs (§7b), assisted + automated ingestion.
 - [ ] Worker process model: in-process task loop vs. separate worker container (start in-process).
 - [ ] Token encryption: Fernet via `SECRET_KEY` (current plan).

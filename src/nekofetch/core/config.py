@@ -177,6 +177,32 @@ class SecurityConfig(BaseModel):
     force_subscribe_channels: list[int] = Field(default_factory=list)
 
 
+class StorageChannelConfig(BaseModel):
+    """The database channel where content packs live (header -> files -> end sticker)."""
+
+    enabled: bool = False
+    channel_id: int = 0                       # -100... id of the database channel
+    # Header text posted before each pack. Variables: {title} {season} {resolution}
+    # {language} {episode_from} {episode_to} {group}
+    header_template: str = "{title} — Season {season} [{resolution}] [{language}]"
+    end_sticker_id: str = ""                  # file_id of the end-of-pack sticker
+    copy_mode: str = "copy"                   # copy | forward
+    include_header_in_delivery: bool = True
+    include_sticker_in_delivery: bool = False
+
+
+class LogChannelConfig(BaseModel):
+    """One channel receiving all logs, with two auto-updated pinned messages."""
+
+    enabled: bool = False
+    channel_id: int = 0
+    pinned_dashboard: bool = True             # live stats summary (edited in place)
+    pinned_catalog: bool = True               # published catalog index (edited in place)
+    refresh_seconds: int = 60
+    # 'all' = everything; otherwise a subset of categories to forward.
+    events: list[str] = Field(default_factory=lambda: ["all"])
+
+
 class SourcesConfig(BaseModel):
     enabled: list[str] = Field(default_factory=lambda: ["local"])
     default: str = "local"
@@ -201,6 +227,8 @@ class AppConfig(BaseModel):
     distribution: DistributionConfig = Field(default_factory=DistributionConfig)
     queue: QueueConfig = Field(default_factory=QueueConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
+    storage_channel: StorageChannelConfig = Field(default_factory=StorageChannelConfig)
+    log_channel: LogChannelConfig = Field(default_factory=LogChannelConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     localization: LocalizationConfig = Field(default_factory=LocalizationConfig)
 

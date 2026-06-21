@@ -58,6 +58,12 @@ class SettingsService:
         await self._save_doc(doc)
         log.info("settings.updated", section=section, field=field, value=value)
 
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "admin", "setting_changed", section=section, field=field, value=value
+        )
+
     async def toggle_feature(self, feature: str) -> bool:
         current = bool(getattr(self._c.config.features, feature))
         await self.set_value("features", feature, not current)

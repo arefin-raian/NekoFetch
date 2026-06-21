@@ -32,6 +32,9 @@ class BotManager:
 
         self._admin = build_admin_bot(self._c)
         await self._admin.start()
+        # The admin client is the privileged actor for storage/log channels (it must be an
+        # administrator of both). Expose it so services can use it.
+        self._c.admin_client = self._admin  # type: ignore[attr-defined]
         log.info("bots.admin.started")
 
         if self._c.config.features.distribution_bots:
@@ -56,6 +59,17 @@ class BotManager:
         dist = DistributionService(self._c)
         if self._c.config.features.temporary_links:
             self._scheduler.every(60, dist.sweep_expired, id="link-expiry-sweep")
+
+        # Log channel: create/pin the dashboard + catalog, then refresh on an interval.
+        if self._c.config.log_channel.enabled:
+            from nekofetch.services.log_channel_service import LogChannelService
+
+            log_svc = LogChannelService(self._c)
+            await log_svc.ensure_pins()
+            self._scheduler.every(
+                self._c.config.log_channel.refresh_seconds, log_svc.refresh, id="log-pins-refresh"
+            )
+
         self._scheduler.start()
 
     async def _load_distribution_bots(self) -> None:

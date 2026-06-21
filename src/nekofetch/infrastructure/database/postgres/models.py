@@ -165,6 +165,46 @@ class AccessLink(Base, PKMixin, TimestampMixin):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class StoragePack(Base, PKMixin, TimestampMixin):
+    """A season pack stored as a message range in the database channel.
+
+    Layout in the channel (the file-sharing-bot pattern):
+
+        header text  ->  file 1, 2, 3 ... N (in order)  ->  end sticker
+
+    Delivery copies the recorded range to the user. A pack is unique per
+    (anime, season, resolution, language).
+    """
+
+    __tablename__ = "storage_packs"
+
+    anime_doc_id: Mapped[str] = mapped_column(String(48), index=True, nullable=False)
+    anime_title: Mapped[str] = mapped_column(String(256), nullable=False)
+    season: Mapped[int | None] = mapped_column(Integer)
+    resolution: Mapped[str] = mapped_column(String(16), nullable=False)
+    audio: Mapped[AudioType] = mapped_column(String(16), nullable=False)
+
+    channel_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    header_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    start_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)   # first file
+    end_message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)     # end sticker / last
+    file_message_ids: Mapped[list | None] = mapped_column(JSONB)                # ordered, explicit
+    file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    episode_from: Mapped[int | None] = mapped_column(Integer)
+    episode_to: Mapped[int | None] = mapped_column(Integer)
+
+    ingest_method: Mapped[str | None] = mapped_column(String(16))  # indexed | uploaded
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "anime_doc_id", "season", "resolution", "audio", name="uq_storage_pack"
+        ),
+        Index("ix_storage_pack_lookup", "anime_doc_id", "season", "resolution", "audio"),
+    )
+
+
 class AnalyticsEvent(Base, PKMixin):
     __tablename__ = "analytics_events"
 

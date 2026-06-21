@@ -38,6 +38,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
   `fetch_assets`), transformer, renderer, and `EnrichmentService` (Mongo-cached). Consumed by
   the distribution bot's title page with graceful fallback. See `docs/SCRAPER_GUIDE.md`.
 
+- Database (storage) channel: `StoragePack` model + `StorageChannelService` storing content
+  as ordered packs (header → files → end sticker) per anime/season/resolution/language.
+  Assisted indexing (admin range input) and automated upload on publish; range delivery
+  with protect/auto-delete. Admin storage panel + indexing flow. Resolves the batch-delivery
+  open decision.
+- Log channel: `LogChannelService` posting all lifecycle/admin/delivery events to one
+  configurable channel, plus two auto-updated pinned messages (live stats dashboard +
+  catalog index) refreshed on a scheduler. Key services instrumented to emit events.
+- Config: `storage_channel.*` and `log_channel.*` sections.
+
 ### Notes
 - Content acquisition remains authorized-only via the `sources` plugin interface
   (`LocalFileSource` reference). No pirate-site scraper is included.

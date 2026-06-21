@@ -176,10 +176,14 @@ class DownloadWorker:
             if req:
                 req.status = RequestStatus.PROCESSING
         log.info("download.job.complete", job_id=job_id)
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event("download", "complete", job=job_id)
         # Hand off to the processing pipeline.
         from nekofetch.services.processing.pipeline import ProcessingPipeline
 
         await ProcessingPipeline(self._c).run_for_job(job_id)
+        await LogChannelService(self._c).event("processing", "complete", job=job_id)
 
     async def _handle_failure(self, job_id: int, exc: Exception) -> None:
         async with session_scope(self._c.pg_sessionmaker) as session:
@@ -189,6 +193,9 @@ class DownloadWorker:
             job.status = JobStatus.FAILED
             job.error = str(exc)
         log.error("download.job.failed", job_id=job_id, error=str(exc))
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event("error", "download_failed", job=job_id, error=str(exc))
 
 
 def _pick_variant(variants, resolution, audio):

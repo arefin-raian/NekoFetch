@@ -74,7 +74,15 @@ class RequestService:
             await session.flush()
             position = await requests.pending_position(req.id)
             req.position = position
-            return RequestReceipt(code=code, position=position, status=req.status.value)
+            receipt = RequestReceipt(code=code, position=position, status=req.status.value)
+
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "request", "submitted", code=code, anime=anime_title, user=telegram_id,
+            scope=scope.value, season=season,
+        )
+        return receipt
 
     async def list_for_user(self, telegram_id: int, *, limit: int = 20) -> list[Request]:
         async with session_scope(self._c.pg_sessionmaker) as session:

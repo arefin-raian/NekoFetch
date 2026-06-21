@@ -42,7 +42,14 @@ class QueueService:
             session.add(job)
             req.status = RequestStatus.QUEUED
             await session.flush()
-            return job.id
+            job_id, title = job.id, req.anime_title
+
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "queue", "enqueued", code=request_code, anime=title, job=job_id
+        )
+        return job_id
 
     async def dashboard(self, *, limit: int | None = None) -> list[QueueRow]:
         limit = limit or self._c.config.queue.max_visible

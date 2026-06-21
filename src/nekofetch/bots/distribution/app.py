@@ -202,45 +202,72 @@ def build_distribution_bot(
 
     @client.on_callback_query(filters.regex(r"^d\|pkg"))
     async def _deliver(_: Client, q: CallbackQuery) -> None:
+        from nekofetch.services.log_channel_service import LogChannelService
+        from nekofetch.services.storage_channel_service import StorageChannelService
+
         _, data = await fsm.get(q.from_user.id)
         await q.answer()
+        audio = AudioType(data["audio"]) if data.get("audio") else None
         try:
             pkg = await dist.build_season_package(
-                data["doc_id"], data["season"],
-                resolution=data.get("resolution"),
-                audio=AudioType(data["audio"]) if data.get("audio") else None,
+                data["doc_id"], data["season"], resolution=data.get("resolution"), audio=audio
             )
-            link = await dist.create_access_link(pkg, user_id=q.from_user.id)
         except NekoFetchError as exc:
             await q.message.edit_text(container.localizer.get(exc.message_key))
             return
 
-        expiry_note = ""
-        if link.expires_at:
-            mins = cfg.link_expiry_minutes
-            expiry_note = f"\n\nThis access expires in {mins} minutes."
+        storage = StorageChannelService(container)
+        logsvc = LogChannelService(container)
+        delivered_ids: list[int] = []
 
-        sent = await client.send_message(
-            q.message.chat.id,
-            f"**Season Package Ready**\n\n"
-            f"{data['title']} — Season {pkg.season}\n"
-            f"{len(pkg.file_ids)} files | {data.get('resolution')} | "
-            f"{_AUDIO_LABELS.get(data.get('audio'), data.get('audio'))}\n"
-            f"Access token: `{link.token}`{expiry_note}",
-            protect_content=cfg.protect_content,
+        # Primary path: copy the database-channel pack (the season package) to the user.
+        pack = None
+        if container.config.storage_channel.enabled and data.get("resolution") and audio:
+            pack = await storage.find_pack(
+                storage.key_from(data["doc_id"], data["season"], data["resolution"], audio)
+            )
+        if pack is not None:
+            await q.message.reply(
+                f"**Season Package**\n\n{data['title']} — Season {pkg.season}\n"
+                f"{pack.file_count} files | {data.get('resolution')} | "
+                f"{_AUDIO_LABELS.get(data.get('audio'), data.get('audio'))}"
+            )
+            delivered_ids = await storage.deliver(pack, q.message.chat.id)
+        else:
+            # Fallback: temporary access token (no pack stored / storage channel disabled).
+            link = await dist.create_access_link(pkg, user_id=q.from_user.id)
+            expiry_note = (
+                f"\n\nThis access expires in {cfg.link_expiry_minutes} minutes."
+                if link.expires_at else ""
+            )
+            sent = await client.send_message(
+                q.message.chat.id,
+                f"**Season Package Ready**\n\n{data['title']} — Season {pkg.season}\n"
+                f"{len(pkg.file_ids)} files | {data.get('resolution')} | "
+                f"{_AUDIO_LABELS.get(data.get('audio'), data.get('audio'))}\n"
+                f"Access token: `{link.token}`{expiry_note}",
+                protect_content=cfg.protect_content,
+            )
+            delivered_ids = [sent.id]
+
+        await logsvc.event(
+            "delivery", "season_package", bot=record.name, user=q.from_user.id,
+            anime=data["title"], season=data.get("season"),
+            resolution=data.get("resolution"), language=data.get("audio"),
+            files=(pack.file_count if pack else len(pkg.file_ids)),
         )
 
-        # Optional auto-delete of the delivery message.
+        # Optional auto-delete of everything delivered.
         scheduler = getattr(container, "scheduler", None)
-        if cfg.auto_delete and container.config.features.auto_delete and scheduler is not None:
+        if cfg.auto_delete and container.config.features.auto_delete and scheduler is not None and delivered_ids:
             when = datetime.now(timezone.utc) + timedelta(minutes=cfg.auto_delete_after_minutes)
 
-            async def _del(chat_id=sent.chat.id, msg_id=sent.id) -> None:
+            async def _del(chat_id=q.message.chat.id, ids=list(delivered_ids)) -> None:
                 try:
-                    await client.delete_messages(chat_id, msg_id)
+                    await client.delete_messages(chat_id, ids)
                 except Exception:  # noqa: BLE001
                     pass
 
-            scheduler.at(when, _del, id=f"autodel-{record.id}-{sent.id}")
+            scheduler.at(when, _del, id=f"autodel-{record.id}-{q.from_user.id}-{delivered_ids[0]}")
 
     return client

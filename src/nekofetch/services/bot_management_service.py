@@ -90,6 +90,12 @@ class BotManagementService:
         if manager is not None:
             await manager.add_distribution_bot(info.id)
         log.info("bot.registered", id=info.id, username=info.username)
+
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "bot", "registered", id=info.id, name=info.name, username=info.username
+        )
         return info
 
     async def list_bots(self) -> list[BotInfo]:
