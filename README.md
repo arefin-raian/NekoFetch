@@ -55,7 +55,9 @@ For local development without Docker, see `docs/ARCHITECTURE.md`.
 
 ## Documentation
 
+- `docs/DEPLOYMENT.md` — first-run + channel setup (start here to run it).
 - `docs/ARCHITECTURE.md` — design decisions, DB structure, service responsibilities, pipeline.
+- `docs/SCRAPER_GUIDE.md` — implement the metadata scraper in one file.
 - `docs/PROJECT_JOURNAL.md` — chronological development log (recovery backbone).
 - `docs/TASKS.md` — live task tracker.
 - `CHANGELOG.md` — formal version history.

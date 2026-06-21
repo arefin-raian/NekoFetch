@@ -76,6 +76,24 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 - Distribution: bot generation flow + anime-bot interface + season-package delivery
   (protected/temporary links + auto-delete via APScheduler).
 
+### Session 1 (cont.) — Staff management UI + deployment guide
+
+**Completed**
+
+- **Staff & user management.** `StaffService` (list team, promote/demote, ban/unban, approve)
+  with `AuditLog` writes + log-channel events; env-whitelisted admins can't be demoted.
+  `staff_admin` panel wired to the existing Staff button (add by user id, per-member remove
+  and ban toggle). Added `UserRepository.set_banned` / `set_approved`.
+- **`docs/DEPLOYMENT.md`** — full first-run guide: prerequisites, `.env`, Docker/manual boot,
+  first-run checklist, Alembic, log-channel + storage-channel setup, distribution bots,
+  metadata enrichment, operations, troubleshooting. Linked from README.
+- Verified clean compile.
+
+**Current state**
+
+- Admin panel surfaces are all live (queue, analytics, settings, storage, bots, approvals,
+  broadcast, staff). Remaining work is operator actions only (scraper, channel config, smoke test).
+
 ### Session 1 (cont.) — Migrations, CI, force-sub, broadcast, binding, watermark
 
 **Completed** ("do whatever's left" — cleared the buildable backlog)

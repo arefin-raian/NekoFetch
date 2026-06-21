@@ -51,3 +51,5 @@
 - Test suite (pytest) + GitHub Actions CI (ruff + compile + pytest).
 - Force-subscribe gate, admin broadcast tool, per-bot title binding.
 - Opt-in ffmpeg watermark processing stage.
+- Staff & user management UI (promote/demote, ban/unban, approve) with audit logging.
+- `docs/DEPLOYMENT.md` first-run + channel setup guide.

@@ -1,8 +1,8 @@
 {
   "project": "NekoFetch",
-  "current_task": "Buildable backlog cleared (migrations, CI, force-sub, broadcast, binding, watermark)",
+  "current_task": "Staff management UI + deployment guide complete",
   "status": "milestone-complete",
-  "last_modified": "2026-06-21T23:30:00",
+  "last_modified": "2026-06-22T00:15:00",
   "phase": "v0.2-feature-complete",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
@@ -23,7 +23,9 @@
     "Alembic migrations (async env + baseline) + AUTO_CREATE_SCHEMA toggle",
     "Test suite (pytest) + GitHub Actions CI",
     "Force-subscribe gate + admin broadcast tool + per-bot title binding",
-    "Opt-in ffmpeg watermark processing stage"
+    "Opt-in ffmpeg watermark processing stage",
+    "Staff & user management UI (promote/demote, ban/unban, approve) + audit logging",
+    "docs/DEPLOYMENT.md first-run + channel setup guide"
   ],
   "next_tasks": [
     "User implements scraper.py fetch_* methods against an authorized source and sets implemented=True",

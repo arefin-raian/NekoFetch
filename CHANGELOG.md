@@ -56,6 +56,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
 - Admin broadcast tool (copies a message to all non-banned users, reports delivered/failed).
 - Per-bot title binding (a distribution bot can open directly on one bound title).
 - Opt-in video watermark processing stage (ffmpeg text/image overlay; corner/opacity/scale).
+- Staff & user management: `StaffService` (promote/demote, ban/unban, approve) with audit
+  logging + log-channel events, and an admin staff panel wired to the Staff button.
+- `docs/DEPLOYMENT.md` — end-to-end first-run and channel setup guide.
 
 ### Notes
 - Content acquisition remains authorized-only via the `sources` plugin interface
