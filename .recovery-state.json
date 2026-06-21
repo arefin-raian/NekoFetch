@@ -1,9 +1,9 @@
 {
   "project": "NekoFetch",
-  "current_task": "Feature-complete; pushed to GitHub",
+  "current_task": "Metadata enrichment seam complete",
   "status": "milestone-complete",
-  "last_modified": "2026-06-21T20:45:00",
-  "phase": "v0.1-pushed",
+  "last_modified": "2026-06-21T21:30:00",
+  "phase": "v0.1-plus-enrichment-seam",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",
@@ -11,20 +11,29 @@
     "Authorized-source interface + LocalFileSource",
     "Premium UX kit (progress/templates/i18n/components)",
     "Auth service + bot middleware",
-    "Multi-bot manager + admin welcome screen + distribution skeleton",
+    "Multi-bot manager + admin welcome + distribution skeleton",
     "Service layer: request, queue, download worker, processing pipeline, branding, distribution, analytics, settings, publishing",
     "Scheduler (link-expiry sweep + auto-delete) wired into bot manager",
-    "Admin bot: request flow, settings panel (live toggles), queue/analytics views, approval panel",
-    "Distribution bots: generation flow, live multi-bot add, anime-bot interface, season-package delivery (protected/temporary/auto-delete)",
-    "Local git initialized with 9 conventional commits"
+    "Admin bot: request flow, settings panel, queue/analytics, approval panel",
+    "Distribution bots: generation, live multi-bot add, anime-bot interface, season-package delivery",
+    "Local git + push to GitHub (public)",
+    "Metadata enrichment seam: providers/metadata (models/base/scraper placeholder/transformer/renderer) + EnrichmentService + distribution consumption + docs/SCRAPER_GUIDE.md"
   ],
   "next_tasks": [
-    "GitHub: create remote + push (needs operator token/username/repo)",
+    "User implements scraper.py fetch_* methods against an authorized source and sets implemented=True",
     "Alembic migrations",
     "Test suite + CI",
     "Optional polish: watermark transcode, force-subscribe, broadcast, per-bot title binding"
   ],
-  "git": {"initialized": true, "branch": "main", "commits": 10, "remote": "https://github.com/arefin-raian/NekoFetch"},
+  "scraper_seam": {
+    "file_to_edit": "src/nekofetch/providers/metadata/scraper.py",
+    "functions": ["fetch_profile_data", "fetch_character_data", "fetch_statistics", "fetch_assets"],
+    "enable_flag": "implemented = True",
+    "guide": "docs/SCRAPER_GUIDE.md",
+    "required_field": "RawProfile.title",
+    "consumed_by": "EnrichmentService.render_card -> distribution bot title page (graceful fallback)"
+  },
+  "git": {"initialized": true, "branch": "main", "commits": 11, "remote": "https://github.com/arefin-raian/NekoFetch"},
   "verification": "python -m compileall src passes",
-  "notes": "Authorized-only content policy. No pirate-site scrapers. python -m nekofetch boots admin bot /start welcome."
+  "notes": "Authorized-only policy. Scraping seam isolated to one file; rest of app consumes typed output and falls back until implemented."
 }

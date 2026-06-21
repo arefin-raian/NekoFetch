@@ -44,6 +44,12 @@ class Container:
         )
         self.sources: SourceRegistry = build_default_registry()
 
+        # Metadata enrichment provider (the pluggable scraping seam). It is safe to
+        # construct unconditionally: until its scraper is implemented it no-ops.
+        from nekofetch.providers.metadata.registry import build_metadata_provider
+
+        self.metadata_provider = build_metadata_provider()
+
         # Populated by startup()
         self.pg_engine: AsyncEngine | None = None
         self.pg_sessionmaker: async_sessionmaker | None = None
@@ -98,6 +104,9 @@ class Container:
 
     async def shutdown(self) -> None:
         log.info("container.shutdown")
+        close = getattr(self.metadata_provider, "close", None)
+        if close is not None:
+            await close()
         if self.redis is not None:
             await self.redis.aclose()
         if self.pg_engine is not None:

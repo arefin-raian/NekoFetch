@@ -76,6 +76,29 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 - Distribution: bot generation flow + anime-bot interface + season-package delivery
   (protected/temporary links + auto-delete via APScheduler).
 
+### Session 1 (cont.) — Metadata enrichment seam (single-file scraper)
+
+**Completed**
+
+- Added an isolated metadata/enrichment provider layer so scraping can be added later by
+  editing one file. Layers: `providers/metadata/models.py` (stable Raw* + AnimeTemplateData
+  + RenderedAnimeInfo contracts), `base.py` (`MetadataProvider` ABC with provided
+  `build_template_data` orchestrator), `scraper.py` (the single editable placeholder —
+  `fetch_profile_data`/`fetch_character_data`/`fetch_statistics`/`fetch_assets`,
+  `implemented` flag), `transformer.py`, `renderer.py`, `registry.py`.
+- `EnrichmentService` (Mongo-cached) is the app's entry point; returns None while the
+  scraper is unimplemented so consumers fall back.
+- Wired consumption into the distribution bot title page (rich card when available, basic
+  details otherwise) and into the container (provider lifecycle).
+- Documented end-to-end in `docs/SCRAPER_GUIDE.md` (functions, inputs, outputs, required
+  fields, scraper→transformer→template→output flow) and ARCHITECTURE §5b.
+- Verified clean compile.
+
+**Current state**
+
+- The scraping seam is in place and consumed but intentionally unimplemented. Operator
+  implements `scraper.py` against an authorized source and flips `implemented = True`.
+
 ### Session 1 (cont.) — Feature-complete (tasks 1–8), local git
 
 **Completed**

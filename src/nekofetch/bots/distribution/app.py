@@ -83,13 +83,30 @@ def build_distribution_bot(
     async def _show_title(
         message: Message, anime_doc_id: str, *, edit: bool = False, title: str | None = None
     ) -> None:
+        from nekofetch.services.enrichment_service import EnrichmentService
+
+        seasons = await dist.seasons_for(anime_doc_id)
+        rows = [[(f"Season {s}", cb("d", "season", s))] for s in seasons] or \
+               [[("No published seasons", cb("noop"))]]
+
+        # Preferred path: rich enrichment card. Returns None (and we fall back) until the
+        # metadata scraper is implemented — no code here changes when you implement it.
+        card = await EnrichmentService(container).render_card(
+            anime_doc_id, anime_doc_id=anime_doc_id
+        )
+        if card is not None:
+            await fsm.set(message.from_user.id, "title", doc_id=anime_doc_id,
+                          title=_title_from_card(card) or (title or anime_doc_id))
+            await _send_card(message, card, keyboard(*rows), edit=edit)
+            return
+
+        # Fallback: basic details from the content source (current behaviour).
         details = None
         try:
             source = container.sources.get(container.config.sources.default)
             details = await source.get_details(anime_doc_id)
         except NekoFetchError:
             pass
-        seasons = await dist.seasons_for(anime_doc_id)
         await fsm.set(message.from_user.id, "title", doc_id=anime_doc_id,
                       title=(details.title if details else (title or anime_doc_id)))
 
@@ -100,14 +117,30 @@ def build_distribution_bot(
         if details and details.genres:
             body.append("Genres: " + ", ".join(details.genres))
         body.append(f"Seasons: {len(seasons)}")
-
-        rows = [[(f"Season {s}", cb("d", "season", s))] for s in seasons] or \
-               [[("No published seasons", cb("noop"))]]
         text = "\n\n".join(body)
         if edit:
             await message.edit_text(text, reply_markup=keyboard(*rows))
         else:
             await message.reply(text, reply_markup=keyboard(*rows))
+
+    def _title_from_card(card) -> str | None:
+        # The card caption's first line is "**Title**"; cheap to recover for FSM state.
+        first = card.caption.splitlines()[0] if card.caption else ""
+        return first.strip("* ") or None
+
+    async def _send_card(message: Message, card, markup, *, edit: bool) -> None:
+        """Render the enrichment card; attach the header image when one is available."""
+        if card.image_url:
+            # Replace the message with a photo card (edit can't switch text->photo).
+            try:
+                await message.reply_photo(card.image_url, caption=card.caption, reply_markup=markup)
+                return
+            except Exception:  # noqa: BLE001 - bad/unreachable image URL: fall back to text
+                pass
+        if edit:
+            await message.edit_text(card.caption, reply_markup=markup)
+        else:
+            await message.reply(card.caption, reply_markup=markup)
 
     @client.on_callback_query(filters.regex(r"^d\|season"))
     async def _season(_: Client, q: CallbackQuery) -> None:

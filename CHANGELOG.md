@@ -32,6 +32,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); the project uses
 - Distribution bots: token-paste generation (encrypted, live without restart), live
   multi-bot management, and the anime-bot interface with season-package delivery.
 
+- Metadata enrichment seam (`providers/metadata/`): stable data contracts, `MetadataProvider`
+  interface with a provided `build_template_data` orchestrator, a single editable
+  `scraper.py` placeholder (`fetch_profile_data`/`fetch_character_data`/`fetch_statistics`/
+  `fetch_assets`), transformer, renderer, and `EnrichmentService` (Mongo-cached). Consumed by
+  the distribution bot's title page with graceful fallback. See `docs/SCRAPER_GUIDE.md`.
+
 ### Notes
 - Content acquisition remains authorized-only via the `sources` plugin interface
   (`LocalFileSource` reference). No pirate-site scraper is included.
+- The metadata enrichment seam ships unimplemented (`implemented = False`); implement the
+  four fetchers in `scraper.py` against an authorized source to enable it.

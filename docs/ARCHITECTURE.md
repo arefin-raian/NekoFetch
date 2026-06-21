@@ -23,6 +23,7 @@ src/nekofetch/
 ├── domain/          # entities, enums, value objects                        (pure, no I/O)
 ├── infrastructure/  # postgres / mongo / redis clients, scheduler, repositories
 ├── sources/         # pluggable AUTHORIZED content-acquisition interface + impls
+├── providers/       # pluggable metadata enrichment seam (scraper placeholder + transform/render)
 ├── services/        # business logic: auth, requests, queue, download, processing, distribution
 ├── ui/              # premium Telegram UX kit: progress bars, templates, components, pagination
 ├── localization/    # i18n loader over resources/language/*.json
@@ -75,6 +76,24 @@ download(variant, dest, on_progress)               # resumable, progress callbac
 `registry.py` discovers registered sources. `local.py` is the reference implementation: it ingests
 a structured local directory of content the operator owns. Future authorized providers (licensed
 HTTP APIs, official catalogs) plug in by implementing `AnimeSource`.
+
+## 5b. Metadata enrichment (pluggable scraping seam)
+
+Acquisition of *display metadata* (profile, characters, statistics, artwork) is isolated in
+`providers/metadata/` so it can be implemented later by editing **one file**. Layers:
+
+```
+scraper.py     fetch_profile_data / fetch_character_data / fetch_statistics / fetch_assets
+               -> Raw* models                                   [the only file to edit]
+transformer.py Raw* -> AnimeTemplateData (canonical view model) [stable]
+renderer.py    AnimeTemplateData -> RenderedAnimeInfo (caption+image) [stable]
+EnrichmentService (services/) -> cache to Mongo `anime`, serve to bots
+```
+
+The `MetadataProvider.implemented` flag gates the seam: while `False`, `EnrichmentService`
+returns `None` and consumers fall back to basic source metadata; flipping it `True` (after
+implementing the fetchers) upgrades every consumer automatically with no other changes.
+Required field: `RawProfile.title`. See `docs/SCRAPER_GUIDE.md`.
 
 ## 6. Processing pipeline
 

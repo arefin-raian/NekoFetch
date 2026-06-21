@@ -8,6 +8,8 @@
 
 ## Pending
 
+- **Implement `scraper.py`** — operator fills the four `fetch_*` methods against an
+  authorized source and sets `implemented = True` (see `docs/SCRAPER_GUIDE.md`).
 - Alembic migrations (dev currently uses `create_all`).
 - Optional polish: video watermarking transcode, force-subscribe gate, broadcast tool,
   per-bot binding of a single title in the generation flow, richer analytics windows.
@@ -33,3 +35,6 @@
   delivery with protected content + temporary links + auto-delete.
 - Local git with logical conventional commits; clean compile of the whole `src` tree.
 - GitHub: public repo created and `main` pushed to https://github.com/arefin-raian/NekoFetch.
+- Metadata enrichment seam: isolated `providers/metadata/` (models, provider interface,
+  single editable `scraper.py` placeholder, transformer, renderer), `EnrichmentService`
+  (Mongo-cached), distribution-bot consumption with fallback, and `docs/SCRAPER_GUIDE.md`.
