@@ -201,38 +201,83 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
 ```
 NekoFetch/
 ├── src/nekofetch/
-│   ├── __main__.py            # entry point: boots container + bot manager
-│   ├── core/                  # config, logging, DI container, security, exceptions
-│   ├── domain/                # enums + pure entities (Role, RequestStatus, …)
-│   ├── infrastructure/
+│   ├── __main__.py                  # entry point: boots container + bot manager
+│   │
+│   ├── core/                        # foundation — imports nothing outward
+│   │   ├── config.py                #   3-layer config (env + yaml) — every section model
+│   │   ├── container.py             #   DI composition root (DB clients, providers, cipher)
+│   │   ├── security.py              #   Fernet cipher for bot-token encryption
+│   │   ├── logging.py               #   structlog setup       · constants.py · exceptions.py
+│   │   └── parsing.py               #   pure helpers (episode-spec parser, …)
+│   │
+│   ├── domain/
+│   │   └── enums.py                 # Role, Permission, RequestStatus, JobStatus, AudioType, …
+│   │
+│   ├── infrastructure/              # I/O adapters
 │   │   ├── database/
-│   │   │   ├── postgres/      # SQLAlchemy models + session
-│   │   │   ├── mongo/         # Motor collections
-│   │   │   └── redis/         # progress store
-│   │   ├── repositories/      # repository pattern (user/request/queue/…)
-│   │   └── scheduler.py       # APScheduler wrapper
-│   ├── sources/               # AUTHORIZED content-acquisition seam + LocalFileSource
+│   │   │   ├── postgres/            #   base.py · models.py (ORM) · session.py
+│   │   │   ├── mongo/collections.py #   Motor collections + indexes
+│   │   │   └── redis/progress.py    #   live progress store
+│   │   ├── repositories/            #   base · user · request · queue (repository pattern)
+│   │   └── scheduler.py             #   APScheduler wrapper (expiry, auto-delete, refresh)
+│   │
+│   ├── sources/                     # ← SEAM: authorized content acquisition
+│   │   ├── base.py                  #   AnimeSource ABC (search/details/episodes/variants/download)
+│   │   ├── local.py                 #   LocalFileSource reference (files you own)
+│   │   └── registry.py
+│   │
 │   ├── providers/
-│   │   ├── metadata/          # ← implement scraper.py (one file) for rich info cards
-│   │   └── shortlink/         # ← pluggable shortener (Linkvertise adapter included)
-│   ├── services/              # business logic (see Architecture)
-│   ├── ui/                    # progress bars, template engine, components, pagination
-│   ├── localization/          # i18n loader over resources/language/*.json
-│   └── bots/
-│       ├── admin/             # admin bot app + handlers (requests, settings, staff, …)
-│       ├── distribution/      # public anime-bot interface
-│       ├── manager.py         # multi-bot runtime + worker + scheduler
-│       ├── middleware.py      # auth / rate-limit / anti-spam
-│       └── force_sub.py       # force-subscribe gate
-├── migrations/                # Alembic (env.py + versions/)
-├── resources/language/en.json # all user-facing text (edit freely)
-├── tests/                     # pytest suite
-├── config.yaml                # feature toggles & behaviour
-├── .env.example               # secrets & connection strings
-├── docker-compose.yml         # postgres + mongo + redis + nekofetch
-├── Dockerfile
-└── docs/                      # ARCHITECTURE, DEPLOYMENT, SCRAPER_GUIDE, JOURNAL, TASKS
+│   │   ├── metadata/                # ← SEAM: rich info cards
+│   │   │   ├── scraper.py           #   ★ implement this ONE file (fetch_* + implemented=True)
+│   │   │   ├── models.py · base.py · transformer.py · renderer.py · registry.py
+│   │   └── shortlink/               # ← SEAM: token-gating shortener
+│   │       ├── base.py · registry.py
+│   │       └── linkvertise.py       #   built-in Linkvertise adapter
+│   │
+│   ├── services/                    # business logic
+│   │   ├── auth_service.py          #   roles + permission checks
+│   │   ├── request_service.py       #   public request workflow
+│   │   ├── queue_service.py         #   download queue + dashboard
+│   │   ├── download_service.py      #   resumable worker + acquisition matrix
+│   │   ├── processing/              #   pipeline: base · pipeline · stages
+│   │   ├── publishing_service.py    #   approval → publish → upload packs → post
+│   │   ├── distribution_service.py  #   season packages + temporary links
+│   │   ├── storage_channel_service.py  # database channel: index / upload / deliver
+│   │   ├── main_channel_service.py  #   main-channel posts ([Index][Download])
+│   │   ├── index_channel_service.py #   per-letter index posts
+│   │   ├── log_channel_service.py   #   event sink + pinned dashboard/catalog
+│   │   ├── access_service.py        #   trial + shortlink-token gating
+│   │   ├── bot_management_service.py · bot_branding.py   # spawn / bind / auto-brand bots
+│   │   ├── enrichment_service.py    #   metadata cache + render cards
+│   │   ├── branding_service.py · settings_service.py · staff_service.py · analytics_service.py
+│   │
+│   ├── ui/                          # progress.py · templates.py · components.py (pagination)
+│   ├── localization/i18n.py         # loads resources/language/*.json
+│   │
+│   └── bots/                        # Telegram layer (Pyrogram)
+│       ├── manager.py               #   multi-bot runtime + download worker + scheduler
+│       ├── middleware.py            #   auth / rate-limit / anti-spam
+│       ├── force_sub.py · fsm.py    #   force-subscribe gate · Redis FSM
+│       ├── admin/
+│       │   ├── app.py · keyboards.py
+│       │   └── handlers/            #   start · requests · settings · approvals · bots_admin
+│       │                            #   storage_admin · staff_admin · admin_tools (broadcast)
+│       └── distribution/app.py      #   public anime-bot interface (+ access gate, deep links)
+│
+├── migrations/                      # Alembic: env.py · script.py.mako · versions/0001_initial
+├── resources/language/en.json       # all user-facing text (edit freely, no code changes)
+├── tests/                           # pytest suite (parsing, progress, templates, perms, …)
+├── docs/                            # ARCHITECTURE · DEPLOYMENT · SCRAPER_GUIDE · JOURNAL · TASKS
+├── config.yaml                      # feature toggles & behaviour (20+ sections)
+├── .env.example                     # secrets & connection strings
+├── alembic.ini · pyproject.toml     # migrations config · packaging + tooling
+├── Dockerfile · docker-compose.yml  # postgres + mongo + redis + nekofetch
+├── .github/workflows/ci.yml         # ruff + compile + pytest
+└── LICENSE · CHANGELOG.md · .recovery-state.json
 ```
+
+> `★` marks the single file to implement for metadata scraping; `←` marks the three
+> pluggable seams. Everything else works out of the box.
 
 ---
 
