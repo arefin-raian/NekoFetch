@@ -45,6 +45,8 @@ class User(Base, PKMixin, TimestampMixin):
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     language: Mapped[str] = mapped_column(String(8), default="en", nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Time-based access (trial / token renewals). None = never granted yet.
+    access_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     requests: Mapped[list["Request"]] = relationship(back_populates="user")
 
@@ -218,6 +220,18 @@ class ChannelPost(Base, PKMixin, TimestampMixin):
     main_message_id: Mapped[int | None] = mapped_column(BigInteger)
     index_letter: Mapped[str | None] = mapped_column(String(2))
     index_message_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class AccessToken(Base, PKMixin, TimestampMixin):
+    """A renewal token a user redeems (after completing a shortlink) for more access time."""
+
+    __tablename__ = "access_tokens"
+
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True, nullable=False)
+    days: Mapped[int] = mapped_column(Integer, nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AnalyticsEvent(Base, PKMixin):

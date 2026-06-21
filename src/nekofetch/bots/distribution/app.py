@@ -55,9 +55,13 @@ def build_distribution_bot(
     async def _start(_: Client, message: Message) -> None:
         if not await _passes_force_sub(message):
             return
-        # Deep-link payload, e.g. /start anime_<doc_id> from the main-channel Download button.
+        # Deep-link payload: anime_<doc> (from main-channel Download) or token_<t> (renewal).
         parts = (message.text or "").split(maxsplit=1)
         payload = parts[1].strip() if len(parts) > 1 else ""
+        if payload.startswith("token_"):
+            await _redeem(message, payload[len("token_"):])
+        if not await _ensure_access(message):
+            return
         if payload.startswith("anime_"):
             await _show_title(message, payload[len("anime_"):])
             return
@@ -65,6 +69,57 @@ def build_distribution_bot(
             await _show_title(message, record.anime_doc_id)
         else:
             await _show_catalog(message)
+
+    async def _bot_username(self_message: Message) -> str | None:
+        if record.username:
+            return record.username
+        try:
+            me = await client.get_me()
+            return me.username
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def _ensure_access(message: Message) -> bool:
+        from nekofetch.services.access_service import AccessService
+
+        status = await AccessService(container).ensure_and_check(
+            message.from_user.id,
+            username=message.from_user.username,
+            first_name=message.from_user.first_name,
+        )
+        if status.has_access:
+            return True
+        await message.reply(
+            "**Access Required**\n\nYour access has expired. Tap below to get a new access "
+            "token — complete the short link and you'll be back here with renewed access.",
+            reply_markup=keyboard([("➜ Get Access", cb("acc", "get"))]),
+        )
+        return False
+
+    async def _redeem(message: Message, token: str) -> None:
+        from nekofetch.services.access_service import AccessService
+
+        try:
+            until = await AccessService(container).redeem(token, message.from_user.id)
+            await message.reply(f"✓ Access granted until **{until:%Y-%m-%d %H:%M} UTC**.")
+        except NekoFetchError as exc:
+            await message.reply(container.localizer.get(exc.message_key))
+
+    @client.on_callback_query(filters.regex(r"^acc\|get"))
+    async def _get_access(_: Client, q: CallbackQuery) -> None:
+        from nekofetch.services.access_service import AccessService
+
+        await q.answer()
+        username = await _bot_username(q.message)
+        if not username:
+            await q.message.reply("Couldn't build an access link right now. Try again later.")
+            return
+        url = await AccessService(container).generate_token(q.from_user.id, bot_username=username)
+        days = container.config.access.token_days
+        await q.message.reply(
+            f"**Get {days} Days Access**\n\nComplete this link, then you'll return to the bot "
+            f"with access unlocked:\n{url}"
+        )
 
     async def _passes_force_sub(message: Message) -> bool:
         from nekofetch.bots.force_sub import channels_to_join, join_keyboard
@@ -237,8 +292,18 @@ def build_distribution_bot(
 
     @client.on_callback_query(filters.regex(r"^d\|pkg"))
     async def _deliver(_: Client, q: CallbackQuery) -> None:
+        from nekofetch.services.access_service import AccessService
         from nekofetch.services.log_channel_service import LogChannelService
         from nekofetch.services.storage_channel_service import StorageChannelService
+
+        # Gate delivery on access (trial/token).
+        if not await AccessService(container).has_access(q.from_user.id):
+            await q.answer()
+            await q.message.reply(
+                "**Access Required**\n\nGet an access token to download.",
+                reply_markup=keyboard([("➜ Get Access", cb("acc", "get"))]),
+            )
+            return
 
         _, data = await fsm.get(q.from_user.id)
         await q.answer()
@@ -292,9 +357,21 @@ def build_distribution_bot(
             files=(pack.file_count if pack else len(pkg.file_ids)),
         )
 
-        # Optional auto-delete of everything delivered.
+        # Optional auto-delete of everything delivered + a heads-up to save the files.
         scheduler = getattr(container, "scheduler", None)
-        if cfg.auto_delete and container.config.features.auto_delete and scheduler is not None and delivered_ids:
+        auto_delete_on = (
+            cfg.auto_delete and container.config.features.auto_delete
+            and scheduler is not None and delivered_ids
+        )
+        if auto_delete_on or container.config.access.forward_to_saved_hint:
+            hint = "**Heads up** — forward these files to your **Saved Messages** to keep them."
+            if auto_delete_on:
+                hint += (
+                    f"\nThey'll be auto-deleted here in **{cfg.auto_delete_after_minutes} minutes**."
+                )
+            await q.message.reply(hint)
+
+        if auto_delete_on:
             when = datetime.now(timezone.utc) + timedelta(minutes=cfg.auto_delete_after_minutes)
 
             async def _del(chat_id=q.message.chat.id, ids=list(delivered_ids)) -> None:

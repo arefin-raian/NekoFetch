@@ -114,6 +114,23 @@ log_channel:
   refresh_seconds: 60
   events: [all]                 # 'all' = everything; or a subset of categories
 
+# Access: free trial, then renew via a shortlink token.
+access:
+  enabled: false
+  free_trial: true
+  trial_days: 3
+  token_days: 3
+  token_link_ttl_hours: 24
+  forward_to_saved_hint: true
+
+# Shortener used to gate token generation (Linkvertise by default).
+shortlink:
+  enabled: false
+  provider: linkvertise
+  linkvertise_user_id: ""       # your Linkvertise publisher id
+  api_token: ""
+  base_url: ""
+
 # Acquisition matrix: when a request doesn't pin a quality/language, fetch all of these.
 # languages map to audio: english = Dub, japanese = Sub (always with English subtitles).
 acquisition:

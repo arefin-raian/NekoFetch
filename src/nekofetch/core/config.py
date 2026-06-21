@@ -207,6 +207,27 @@ class LogChannelConfig(BaseModel):
     events: list[str] = Field(default_factory=lambda: ["all"])
 
 
+class AccessConfig(BaseModel):
+    """Time-based access: a free trial, then renew via a shortlink token."""
+
+    enabled: bool = False
+    free_trial: bool = True
+    trial_days: int = 3
+    token_days: int = 3
+    token_link_ttl_hours: int = 24       # how long a generated token link stays valid
+    forward_to_saved_hint: bool = True   # nudge users to forward files to Saved Messages
+
+
+class ShortlinkConfig(BaseModel):
+    """URL shortener used to gate token generation (e.g. Linkvertise)."""
+
+    enabled: bool = False
+    provider: str = "linkvertise"
+    linkvertise_user_id: str = ""        # your Linkvertise publisher id
+    api_token: str = ""                  # generic api token for other providers
+    base_url: str = ""                   # generic provider base url
+
+
 class AcquisitionConfig(BaseModel):
     """What to fetch when a request doesn't pin a specific quality/language.
 
@@ -276,6 +297,8 @@ class AppConfig(BaseModel):
     main_channel: MainChannelConfig = Field(default_factory=MainChannelConfig)
     index_channel: IndexChannelConfig = Field(default_factory=IndexChannelConfig)
     acquisition: AcquisitionConfig = Field(default_factory=AcquisitionConfig)
+    access: AccessConfig = Field(default_factory=AccessConfig)
+    shortlink: ShortlinkConfig = Field(default_factory=ShortlinkConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     localization: LocalizationConfig = Field(default_factory=LocalizationConfig)
 

@@ -47,8 +47,10 @@ class Container:
         # Metadata enrichment provider (the pluggable scraping seam). It is safe to
         # construct unconditionally: until its scraper is implemented it no-ops.
         from nekofetch.providers.metadata.registry import build_metadata_provider
+        from nekofetch.providers.shortlink.registry import build_shortlink_provider
 
         self.metadata_provider = build_metadata_provider()
+        self.shortlink_provider = build_shortlink_provider(config.shortlink)
 
         # Populated by startup()
         self.pg_engine: AsyncEngine | None = None
