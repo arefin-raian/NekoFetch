@@ -18,7 +18,7 @@ import time
 
 from nekofetch.core.container import Container
 from nekofetch.core.logging import get_logger
-from nekofetch.domain.enums import JobStatus, RequestStatus
+from nekofetch.domain.enums import AudioType, JobStatus, RequestStatus
 from nekofetch.infrastructure.database.postgres.models import DownloadJob, MediaFile
 from nekofetch.infrastructure.database.postgres.session import session_scope
 from nekofetch.infrastructure.database.redis.progress import ProgressSnapshot

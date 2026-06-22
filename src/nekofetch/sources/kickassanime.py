@@ -497,9 +497,11 @@ class KickAssAnimeSource(AnimeSource):
         ffmpeg_args = [
             "ffmpeg",
             "-y",
+            "-headers", "Referer: https://kaa.lt/\r\n",
             "-i", video_url,
             "-c", "copy",
             "-bsf:a", "aac_adtstoasc" if ext == ".mp4" else "copy",
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             str(dest),
         ]
 

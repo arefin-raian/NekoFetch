@@ -65,7 +65,7 @@ class QueueService:
                         job_id=job.id,
                         anime_title=req.anime_title if req else "—",
                         requested_by=str(req.user_id) if req else "—",
-                        status=(snap.status if snap else job.status.value),
+                        status=(snap.status if snap else (job.status.value if isinstance(job.status, JobStatus) else job.status)),
                         progress=(snap.progress if snap else job.progress),
                         speed_bps=(snap.speed_bps if snap else job.speed_bps),
                         eta_seconds=(snap.eta_seconds if snap else job.eta_seconds),
