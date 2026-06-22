@@ -36,12 +36,51 @@ class BotManager:
         # administrator of both). Expose it so services can use it.
         self._c.admin_client = self._admin  # type: ignore[attr-defined]
         await self._publish_commands(self._admin, kind="admin")
+        await self._preflight_channels()
         log.info("bots.admin.started")
 
         if self._c.config.features.distribution_bots:
             await self._load_distribution_bots()
 
         await self._start_background_workers()
+
+    async def _preflight_channels(self) -> None:
+        """Resolve every configured Telegram channel once at startup.
+
+        A freshly-created Pyrogram *bot* session holds no cached access hash for a private
+        channel, so the very first send raises ``Peer id invalid``. Touching each channel
+        via ``get_chat`` warms that cache when the bot can already see the channel, and when
+        it cannot, emits a single actionable instruction instead of a storm of cryptic
+        errors from every downstream send.
+        """
+        cfg = self._c.config
+        sections = [
+            ("storage", cfg.storage_channel),
+            ("log", cfg.log_channel),
+            ("main", cfg.main_channel),
+            ("index", cfg.index_channel),
+        ]
+        for name, section in sections:
+            if not getattr(section, "enabled", False) or not getattr(section, "channel_id", 0):
+                continue
+            cid = section.channel_id
+            try:
+                chat = await self._admin.get_chat(cid)
+                log.info("bots.channel.ok", channel=name, id=cid, title=getattr(chat, "title", None))
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "bots.channel.unreachable",
+                    channel=name,
+                    id=cid,
+                    error=str(exc),
+                    hint=(
+                        "Make the admin bot an administrator of this channel, then post any "
+                        "message in it (or remove + re-add the bot) while NekoFetch is running "
+                        "so Telegram caches the peer. Confirm the id is the full -100... value. "
+                        "Deleting the Pyrogram .session on each launch wipes this cache and "
+                        "brings the error back."
+                    ),
+                )
 
     async def _publish_commands(self, client, *, kind: str) -> None:
         """Publish the Telegram command menu so users can discover commands.
