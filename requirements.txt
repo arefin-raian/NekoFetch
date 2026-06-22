@@ -1,5 +1,5 @@
 --index-url https://pypi.org/simple
-pyrogram>=2.0.106
+pyrofork>=2.3.0
 sqlalchemy[asyncio]>=2.0.30
 asyncpg>=0.29.0
 alembic>=1.13.0

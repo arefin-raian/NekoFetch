@@ -14,6 +14,9 @@ from nekofetch.core.logging import get_logger
 
 log = get_logger(__name__)
 
+_RESOLVE_RETRY_SECONDS = 10
+_RESOLVE_MAX_RETRIES = 12  # 2 minutes of retries
+
 
 class BotManager:
     def __init__(self, container: Container) -> None:
@@ -45,14 +48,7 @@ class BotManager:
         await self._start_background_workers()
 
     async def _preflight_channels(self) -> None:
-        """Resolve every configured Telegram channel once at startup.
-
-        A freshly-created Pyrogram *bot* session holds no cached access hash for a private
-        channel, so the very first send raises ``Peer id invalid``. Touching each channel
-        via ``get_chat`` warms that cache when the bot can already see the channel, and when
-        it cannot, emits a single actionable instruction instead of a storm of cryptic
-        errors from every downstream send.
-        """
+        """Resolve every configured Telegram channel at startup and retry in background."""
         cfg = self._c.config
         sections = [
             ("storage", cfg.storage_channel),
@@ -64,23 +60,50 @@ class BotManager:
             if not getattr(section, "enabled", False) or not getattr(section, "channel_id", 0):
                 continue
             cid = section.channel_id
+            if await self._try_resolve(name, cid):
+                continue
+            asyncio.create_task(self._retry_resolve(name, cid))
+
+    async def _try_resolve(self, name: str, cid: int) -> bool:
+        try:
+            chat = await self._admin.get_chat(cid)
+            log.info("bots.channel.ok", channel=name, id=cid, title=getattr(chat, "title", None))
+            return True
+        except Exception as exc:
+            log.warning(
+                "bots.channel.unreachable",
+                channel=name,
+                id=cid,
+                error=str(exc),
+                hint=(
+                    "Make the admin bot an administrator of this channel, then post any "
+                    "message in it (or remove + re-add the bot) while NekoFetch is running "
+                    "so Telegram caches the peer. Confirm the id is the full -100... value. "
+                    "Deleting the Pyrogram .session on each launch wipes this cache and "
+                    "brings the error back."
+                ),
+            )
+            return False
+
+    async def _retry_resolve(self, name: str, cid: int) -> None:
+        """Keep trying to resolve the channel peer in the background for ~2 minutes.
+
+        When the bot is added to a private channel it receives a ``ChatMemberUpdated``
+        update that contains only the ``chat_id`` — the ``access_hash`` needed for
+        subsequent API calls is only cached after the bot *receives a message* from
+        that channel (or the user mentions the bot there). This retry window gives the
+        user time to trigger that event.
+        """
+        log.info("bots.channel.retrying", channel=name, id=cid)
+        for attempt in range(1, _RESOLVE_MAX_RETRIES + 1):
+            await asyncio.sleep(_RESOLVE_RETRY_SECONDS)
             try:
                 chat = await self._admin.get_chat(cid)
-                log.info("bots.channel.ok", channel=name, id=cid, title=getattr(chat, "title", None))
-            except Exception as exc:  # noqa: BLE001
-                log.warning(
-                    "bots.channel.unreachable",
-                    channel=name,
-                    id=cid,
-                    error=str(exc),
-                    hint=(
-                        "Make the admin bot an administrator of this channel, then post any "
-                        "message in it (or remove + re-add the bot) while NekoFetch is running "
-                        "so Telegram caches the peer. Confirm the id is the full -100... value. "
-                        "Deleting the Pyrogram .session on each launch wipes this cache and "
-                        "brings the error back."
-                    ),
-                )
+                log.info("bots.channel.resolved", channel=name, id=cid, title=getattr(chat, "title", None))
+                return
+            except Exception:
+                log.debug("bots.channel.retry_pending", channel=name, id=cid, attempt=attempt)
+        log.warning("bots.channel.retry_exhausted", channel=name, id=cid)
 
     async def _publish_commands(self, client, *, kind: str) -> None:
         """Publish the Telegram command menu so users can discover commands.
