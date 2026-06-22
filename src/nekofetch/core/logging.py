@@ -11,6 +11,11 @@ import sys
 
 import structlog
 
+if sys.platform == "win32":
+    import colorama
+
+    colorama.init()
+
 
 def configure_logging(level: str = "INFO", json: bool = False) -> None:
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level.upper())
