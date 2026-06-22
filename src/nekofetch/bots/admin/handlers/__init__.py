@@ -16,6 +16,7 @@ def register_all(client: Client, container: Container) -> None:
         admin_tools,
         approvals,
         bots_admin,
+        commands,
         requests,
         review,
         settings,
@@ -26,6 +27,8 @@ def register_all(client: Client, container: Container) -> None:
     from nekofetch.bots.middleware import install_auth_middleware
 
     install_auth_middleware(client, container)
+    # Registered before the stateful text routers so /help and /cancel win the match.
+    commands.register(client, container)
     start.register(client, container)
     requests.register(client, container)
     review.register(client, container)

@@ -35,12 +35,30 @@ class BotManager:
         # The admin client is the privileged actor for storage/log channels (it must be an
         # administrator of both). Expose it so services can use it.
         self._c.admin_client = self._admin  # type: ignore[attr-defined]
+        await self._publish_commands(self._admin, kind="admin")
         log.info("bots.admin.started")
 
         if self._c.config.features.distribution_bots:
             await self._load_distribution_bots()
 
         await self._start_background_workers()
+
+    async def _publish_commands(self, client, *, kind: str) -> None:
+        """Publish the Telegram command menu so users can discover commands.
+
+        Best-effort: a transient API hiccup here must never stop a bot from running.
+        """
+        try:
+            if kind == "admin":
+                from nekofetch.bots.admin.handlers.commands import publish_admin_commands
+
+                await publish_admin_commands(client)
+            else:
+                from nekofetch.bots.distribution.app import publish_distribution_commands
+
+                await publish_distribution_commands(client)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bots.commands.publish_failed", kind=kind, error=str(exc))
 
     async def _start_background_workers(self) -> None:
         from nekofetch.infrastructure.scheduler import Scheduler
@@ -90,6 +108,7 @@ class BotManager:
                 token = self._c.cipher.decrypt(row.encrypted_token)
                 client = build_distribution_bot(self._c, row, token)
                 await client.start()
+                await self._publish_commands(client, kind="distribution")
                 self._distribution[row.id] = client
                 log.info("bots.distribution.started", bot=row.name, id=row.id)
             except Exception as exc:  # one bad token must not stop the fleet
@@ -113,6 +132,7 @@ class BotManager:
             token = self._c.cipher.decrypt(row.encrypted_token)
             client = build_distribution_bot(self._c, row, token)
         await client.start()
+        await self._publish_commands(client, kind="distribution")
         self._distribution[bot_id] = client
         log.info("bots.distribution.added", id=bot_id)
 

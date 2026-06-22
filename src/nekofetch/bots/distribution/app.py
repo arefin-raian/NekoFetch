@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from pyrogram import Client, filters
-from pyrogram.types import CallbackQuery, Message
+from pyrogram.types import BotCommand, CallbackQuery, Message
 
 from nekofetch.bots.fsm import FSM
 from nekofetch.core.constants import DIAMOND_FILLED
@@ -31,6 +31,17 @@ _AUDIO_LABELS = {
     AudioType.DUBBED.value: "Dubbed",
     AudioType.DUAL_AUDIO.value: "Dual Audio",
 }
+
+# Telegram command menu for public distribution bots.
+DISTRIBUTION_COMMANDS = [
+    BotCommand("start", "Browse the library / open a title"),
+    BotCommand("help", "How to download & get access"),
+]
+
+
+async def publish_distribution_commands(client: Client) -> None:
+    """Push the command menu to Telegram. Call once, after the client has started."""
+    await client.set_bot_commands(DISTRIBUTION_COMMANDS)
 
 
 def build_distribution_bot(
@@ -69,6 +80,16 @@ def build_distribution_bot(
             await _show_title(message, record.anime_doc_id)
         else:
             await _show_catalog(message)
+
+    @client.on_message(filters.command("help"))
+    async def _help(_: Client, message: Message) -> None:
+        await message.reply(
+            "**How this works**\n\n"
+            f"{DIAMOND_FILLED} /start — browse the library (or open the bound title)\n"
+            f"{DIAMOND_FILLED} Pick a Season, then a Resolution, then a Language\n"
+            f"{DIAMOND_FILLED} Tap *Get Season Package* to receive the files\n\n"
+            "If your access has expired, tap *Get Access* and complete the short link to renew."
+        )
 
     async def _bot_username(self_message: Message) -> str | None:
         if record.username:
