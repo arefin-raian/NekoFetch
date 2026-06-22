@@ -11,11 +11,6 @@ import sys
 
 import structlog
 
-if sys.platform == "win32":
-    import colorama
-
-    colorama.init()
-
 
 def configure_logging(level: str = "INFO", json: bool = False) -> None:
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level.upper())
@@ -27,10 +22,18 @@ def configure_logging(level: str = "INFO", json: bool = False) -> None:
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
     ]
+    colors = True
+    if sys.platform == "win32":
+        try:
+            import colorama
+
+            colorama.init()
+        except ImportError:
+            colors = False
     processors.append(
         structlog.processors.JSONRenderer()
         if json
-        else structlog.dev.ConsoleRenderer(colors=True)
+        else structlog.dev.ConsoleRenderer(colors=colors)
     )
 
     structlog.configure(
