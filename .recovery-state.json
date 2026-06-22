@@ -1,9 +1,10 @@
 {
   "project": "NekoFetch",
-  "current_task": "Workflow build-out (main channel, acquisition, branding, access)",
-  "status": "milestone-complete",
-  "last_modified": "2026-06-22T02:00:00",
-  "phase": "v0.3-workflow-complete",
+  "current_task": "KickAssAnime HLS downloader (custom httpx-based, CDN 403 bypass)",
+  "status": "in-progress",
+  "last_modified": "2026-06-22T18:00:00",
+  "phase": "v0.4-kaa-hls-downloader",
+  "current_session": "Session 3 — Fixed `_fix_url` relative paths, replaced ffmpeg HLS with httpx segment-by-segment download, matched Kotlin extension headers (mobile UA + Origin/Referer/Sec-Fetch), added retry with exponential backoff for 5xx, propagated player_url through source_ref. Intermittent 521 on hls.krussdomi.com is server-side.",
   "completed_tasks": [
     "Foundation: docs, config, structure, Docker",
     "Core: config/logging/DI/security/exceptions",

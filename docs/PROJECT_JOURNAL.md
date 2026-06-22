@@ -5,6 +5,31 @@ Chronological development log. Newest entries at the top. This file (with `TASKS
 
 ---
 
+## 2026-06-22
+
+### Session 3 — KickAssAnime HLS downloader (custom httpx-based, bypass CDN 403s)
+
+**Completed**
+
+- **Fixed `_fix_url`** — Added `urljoin` fallback for relative paths not starting with `/` or `//`.
+- **Custom HLS downloader** (`_download_hls`) — Replaced ffmpeg-based HLS with httpx segment-by-segment download. ffmpeg's `-headers` doesn't propagate to HLS sub-requests, causing 403s.
+- **Matched Kotlin extension headers** — Mobile UA (`Android 10 / Chrome 129`) + per-request-type Origin/Referer/Sec-Fetch headers. Desktop UA was blocked by CDNs (`st1.habibikun.xyz` etc); mobile UA passes through.
+- **Retry with exponential backoff** — 3 retries on 5xx (521, 502) for all HTTP requests.
+- **`player_url` → `source_ref`** — Player page URL propagated to `_download_hls` for correct Origin derivation.
+- **Discovered KAADL button** — kaa.lt download button exists but requires login + Cloudflare Turnstile. Not automatable.
+
+**Key files modified**
+
+- `src/nekofetch/sources/kickassanime.py`
+
+**Current state**
+
+Downloads work end-to-end for KickAssAnime when origin server (`hls.krussdomi.com`) is up. Intermittent 521 is a server-side availability issue, not a code bug.
+
+**Known issues / open questions**
+
+- `hls.krussdomi.com` origin occasionally returns 521 (server down) — transient, not fixable from client side.
+
 ## 2026-06-21
 
 ### Session 1 — Project bootstrap

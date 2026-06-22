@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import time
 import urllib.parse
@@ -81,7 +82,20 @@ def _fix_url(raw: str, base: str | None = None) -> str:
 
         parsed = urlparse(base)
         return f"{parsed.scheme}://{parsed.netloc}{raw}"
+    if not raw.startswith("http") and base:
+        from urllib.parse import urljoin
+        return urljoin(base, raw)
     return re.sub(r"^(https?)//+", r"\1://", raw)
+
+
+def _find_ffmpeg() -> str | None:
+    ffmpeg_bin = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
+    if ffmpeg_bin:
+        return ffmpeg_bin
+    for p in [r"C:\Program Files\ShareX\ffmpeg.exe"]:
+        if Path(p).exists():
+            return p
+    return None
 
 
 class KickAssAnimeSource(AnimeSource):
@@ -301,6 +315,7 @@ class KickAssAnimeSource(AnimeSource):
 
             qualities = await self._probe_qualities(hls_url)
             subs = video.get("subtitles", [])
+            player_url = video.get("player_url", src)
 
             for q in qualities:
                 variants.append(
@@ -309,6 +324,7 @@ class KickAssAnimeSource(AnimeSource):
                             "video_url": _fix_url(hls_url),
                             "server": name,
                             "quality": q,
+                            "player_url": player_url,
                             "subtitles": [(s.get("name", ""), _fix_url(s.get("src", ""))) for s in subs],
                         }),
                         resolution=q,
@@ -332,12 +348,18 @@ class KickAssAnimeSource(AnimeSource):
         clean = html.replace("&quot;", '"')
 
         if '"manifest":[0,' in clean:
-            return self._parse_new_player(clean)
+            result = self._parse_new_player(clean)
+            if result:
+                result["player_url"] = final_url
+            return result
 
         if "cid: '" not in html:
             return None
 
-        return await self._extract_legacy(html, final_url, server_name)
+        result = await self._extract_legacy(html, final_url, server_name)
+        if result:
+            result["player_url"] = final_url
+        return result
 
     def _parse_new_player(self, clean_html: str) -> dict | None:
         m = re.search(r'manifest":\[0,"(?:https?:)?(//[^"]+)"', clean_html)
@@ -488,11 +510,16 @@ class KickAssAnimeSource(AnimeSource):
 
         ext = ".mp4"
         if ".m3u8" in video_url:
-            ext = ".mp4"
+            ext = ".mkv"
         elif ".mpd" in video_url:
             ext = ".mp4"
 
         dest = dest.with_suffix(ext)
+
+        if ".m3u8" in video_url:
+            player_url = info.get("player_url", "")
+            subs = info.get("subtitles", [])
+            return await self._download_hls(video_url, dest, player_url=player_url, subtitles=subs, on_progress=on_progress)
 
         ffmpeg_args = [
             "ffmpeg",
@@ -526,5 +553,152 @@ class KickAssAnimeSource(AnimeSource):
         return {
             "checksum": sha.hexdigest(),
             "bytes": total,
+            "complete": True,
+        }
+
+    async def _retry_get(self, url: str, headers: dict, retries: int = 5) -> httpx.Response:
+        for attempt in range(retries):
+            resp = await self.http.get(url, headers=headers)
+            if resp.status_code < 500:
+                return resp
+            await asyncio.sleep(min(2 ** attempt, 10))
+        return resp
+
+    async def _download_hls(
+        self,
+        manifest_url: str,
+        dest: Path,
+        *,
+        player_url: str = "",
+        subtitles: list[tuple[str, str]] | None = None,
+        on_progress: ProgressCallback | None = None,
+    ) -> dict:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        is_mkv = dest.suffix == ".mkv"
+
+        origin_host = urllib.parse.urlparse(player_url).hostname if player_url else "krussdomi.com"
+        seg_headers = {
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Origin": f"https://{origin_host}",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
+        }
+        master_headers = {**seg_headers, "Referer": "https://kaa.lt/"}
+
+        resp = await self._retry_get(manifest_url, master_headers)
+        resp.raise_for_status()
+        manifest = resp.text
+
+        # Parse master manifest
+        playlist_url = manifest_url
+        audio_playlist_urls: list[tuple[str, str]] = []
+
+        lines = manifest.splitlines()
+        for i, line in enumerate(lines):
+            if line.startswith("#EXT-X-MEDIA:TYPE=AUDIO"):
+                m = re.search(r'NAME="([^"]+)".*URI="([^"]+)"', line)
+                if m:
+                    audio_playlist_urls.append((m.group(1), _fix_url(m.group(2), manifest_url)))
+            elif line.startswith("#EXT-X-STREAM-INF"):
+                if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
+                    candidate = _fix_url(lines[i + 1], manifest_url)
+                    if "RESOLUTION=1920x108" in line or playlist_url == manifest_url:
+                        playlist_url = candidate
+
+        # Download video segments
+        resp = await self._retry_get(playlist_url, master_headers)
+        resp.raise_for_status()
+        video_segments: list[bytes] = []
+        for line in resp.text.splitlines():
+            if not line.startswith("#") and line.strip():
+                seg_url = _fix_url(line, playlist_url)
+                sr = await self._retry_get(seg_url, seg_headers, retries=3)
+                sr.raise_for_status()
+                video_segments.append(sr.content)
+        video_ts = dest.parent / f".{dest.stem}.video.ts"
+        video_ts.write_bytes(b"".join(video_segments))
+        del video_segments
+
+        # Download audio segments (Japanese default)
+        audio_ts = None
+        audio_inputs = [str(video_ts)]
+        audio_map = ["-map", "0:v"]
+        if audio_playlist_urls:
+            audio_name, audio_url = audio_playlist_urls[0]
+            log.info("Downloading audio: %s", audio_name)
+            resp = await self._retry_get(audio_url, master_headers)
+            resp.raise_for_status()
+            audio_parts: list[bytes] = []
+            for line in resp.text.splitlines():
+                if not line.startswith("#") and line.strip():
+                    seg_url = _fix_url(line, audio_url)
+                    sr = await self._retry_get(seg_url, seg_headers, retries=3)
+                    sr.raise_for_status()
+                    audio_parts.append(sr.content)
+            audio_ts = dest.parent / f".{dest.stem}.audio.ts"
+            audio_ts.write_bytes(b"".join(audio_parts))
+            del audio_parts
+            audio_inputs.append(str(audio_ts))
+            audio_map.extend(["-map", "1:a"])
+
+        # Download subtitles
+        sub_inputs: list[str] = []
+        sub_maps: list[str] = []
+        sub_meta: list[str] = []
+        if subtitles:
+            for idx, (lang_name, sub_url) in enumerate(subtitles):
+                try:
+                    sr = await self.http.get(sub_url, headers=seg_headers)
+                    sr.raise_for_status()
+                    sub_file = dest.parent / f".{dest.stem}.sub{idx}.vtt"
+                    sub_file.write_bytes(sr.content)
+                    sub_inputs.append(str(sub_file))
+                    sub_maps.extend(["-map", f"{len(audio_inputs) + idx}:s"])
+                    lang_code = lang_name.split("(")[-1].rstrip(")") if "(" in lang_name else "eng"
+                    sub_meta.extend([f"-metadata:s:s:{idx}", f"language={lang_code}"])
+                except Exception:
+                    log.warning("Failed to download subtitle: %s", lang_name)
+
+        # Remux video + audio + subs into final container
+        if is_mkv and audio_inputs:
+            ffmpeg_bin = _find_ffmpeg()
+            if ffmpeg_bin:
+                cmd = [ffmpeg_bin, "-y"]
+                for inp in audio_inputs:
+                    cmd.extend(["-i", inp])
+                for inp in sub_inputs:
+                    cmd.extend(["-i", inp])
+                cmd.extend(["-c", "copy"] + audio_map + sub_maps + sub_meta + [str(dest)])
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    raise RuntimeError(f"ffmpeg mux failed (exit {proc.returncode}): {stderr.decode(errors='replace')[:300]}")
+                video_ts.unlink()
+                if audio_ts:
+                    audio_ts.unlink()
+                for f in sub_inputs:
+                    Path(f).unlink(missing_ok=True)
+            else:
+                dest = video_ts
+        else:
+            dest = video_ts
+
+        total_bytes = dest.stat().st_size
+        if on_progress:
+            await on_progress(total_bytes, total_bytes)
+
+        sha = hashlib.sha256()
+        sha.update(dest.read_bytes())
+
+        return {
+            "checksum": sha.hexdigest(),
+            "bytes": total_bytes,
             "complete": True,
         }
