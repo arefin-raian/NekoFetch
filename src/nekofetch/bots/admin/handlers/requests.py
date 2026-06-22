@@ -188,6 +188,7 @@ def register(client: Client, container: Container) -> None:
 
     async def _finalize(message, user_id: int, data: dict, *, scope: DownloadScope) -> None:
         from nekofetch.services.request_service import RequestService
+        from nekofetch.services.queue_service import QueueService
 
         await asyncio.sleep(0)  # yield
         try:
@@ -204,6 +205,15 @@ def register(client: Client, container: Container) -> None:
             await message.reply(L(exc.message_key))
             return
         await fsm.clear(user_id)
+
+        # Admins bypass the review step — enqueue immediately.
+        is_admin = user_id in container.env.admin_ids
+        if is_admin:
+            try:
+                await QueueService(container).enqueue(receipt.code)
+            except NekoFetchError:
+                pass
+
         await message.reply(
             f"**{L('request_accepted_title')}**\n\n"
             f"{L('request_id_label')}:\n#{receipt.code}\n\n"
