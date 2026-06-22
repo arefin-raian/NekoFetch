@@ -23,8 +23,14 @@
 > that scrapes pirate streaming sites, and the metadata-acquisition layer is a deliberately
 > empty seam you implement yourself against a source you are authorized to use.
 >
+> **The `kickassanime` source included in this repository is for development/testing only.**
+> Due to budget constraints during development, a free anime source was implemented as a
+> placeholder. This is intended **solely for personal testing** and should be replaced with
+> a properly licensed content source before any production or public deployment. You must
+> implement your own `AnimeSource` subclass for your authorized content library.
+>
 > **You are solely responsible** for ensuring you hold the rights to any content you ingest
-> or distribute through this software.
+> or distribute through this software, and for complying with all applicable terms of service.
 
 ---
 

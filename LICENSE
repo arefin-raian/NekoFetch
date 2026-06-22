@@ -21,13 +21,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ---------------------------------------------------------------------------
-ACCEPTABLE USE NOTICE (not part of the MIT grant; a statement of intent)
+ ACCEPTABLE USE NOTICE (not part of the MIT grant; a statement of intent)
 
-NekoFetch is a neutral content-distribution platform. It ships no content, no
-pirate-site scrapers, and no metadata source; content acquisition is performed
-only through interfaces ("seams") that the operator implements and configures.
+ NekoFetch is a neutral content-distribution platform. It ships no content, no
+ pirate-site scrapers, and no metadata source; content acquisition is performed
+ only through interfaces ("seams") that the operator implements and configures.
 
-By using this Software you acknowledge that you are solely responsible for:
+ DEVELOPMENT NOTE: A kickassanime source implementation is included for testing
+ and development purposes only, due to budget constraints. This is intended as a
+ placeholder and should be replaced with a licensed content source before any
+ production or public deployment.
+
+ By using this Software you acknowledge that you are solely responsible for:
   - holding the rights to, or a valid license for, any content you ingest,
     store, or distribute through it; and
   - complying with the terms of service and applicable law of any source,
