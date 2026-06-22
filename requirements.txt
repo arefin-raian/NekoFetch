@@ -1,0 +1,18 @@
+--index-url https://pypi.org/simple
+pyrogram>=2.0.106
+sqlalchemy[asyncio]>=2.0.30
+asyncpg>=0.29.0
+alembic>=1.13.0
+motor>=3.4.0
+redis>=5.0.0
+apscheduler>=3.10.0
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+pyyaml>=6.0
+structlog>=24.1.0
+cryptography>=42.0.0
+httpx>=0.27.0
+aiofiles>=23.2.0
+colorama>=0.4.6
+TgCryptoX>=1.0.1
+hatchling

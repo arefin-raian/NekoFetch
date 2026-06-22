@@ -1,0 +1,57 @@
+services:
+  - type: worker
+    name: nekofetch
+    env: python
+    buildCommand: pip install hatchling && pip install ".[speedups]"
+    startCommand: python -m nekofetch
+    healthCheckPath: /healthz
+    numInstances: 1
+    plan: starter
+
+    envVars:
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      - key: ADMIN_BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+
+      - key: POSTGRES_HOST
+        value: postgres
+      - key: POSTGRES_PORT
+        value: "5432"
+      - key: POSTGRES_USER
+        value: nekofetch
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: POSTGRES_DB
+        value: nekofetch
+
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB
+        value: nekofetch
+
+      - key: REDIS_URL
+        sync: false
+
+      - key: STORAGE_PATH
+        value: /data/storage
+      - key: SESSION_PATH
+        value: /data/sessions
+
+      - key: LOG_LEVEL
+        value: INFO
+      - key: LOG_JSON
+        value: "true"
+      - key: AUTO_CREATE_SCHEMA
+        value: "false"
+
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 10
