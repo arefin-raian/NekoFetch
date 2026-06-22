@@ -163,8 +163,8 @@ index_channel:
 
 sources:
   # Only authorized sources are enabled. Pirate-site plugins are not shipped.
-  enabled: [local]
-  default: local
+  enabled: [kickassanime, local]
+  default: kickassanime
 
 localization:
   default_language: en
