@@ -58,6 +58,15 @@ echo [NekoFetch] Starting... ^(press Ctrl+C to stop^)
 REM Ensure ffmpeg is reachable (ShareX bundling, manual install, or winget).
 if not exist "%VENV_PY%" exit /b 1
 where ffmpeg >nul 2>&1 || set "PATH=%PATH%;C:\Program Files\ShareX"
+
+REM Kill stale bot process and unlock its SQLite session file.
+taskkill /f /im python.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+if exist "C:\data\sessions" (
+    del /q "C:\data\sessions\*.session" 2>nul
+    del /q "C:\data\sessions\*" 2>nul
+)
+
 "%VENV_PY%" -m nekofetch
 
 echo.
