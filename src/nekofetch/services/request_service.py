@@ -84,6 +84,34 @@ class RequestService:
         )
         return receipt
 
+    async def list_pending(self, *, limit: int = 50) -> list[Request]:
+        """Requests awaiting staff review (oldest first), detached for safe UI reads."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            rows = await RequestRepository(session).list_by_status(
+                RequestStatus.PENDING, limit=limit
+            )
+            for r in rows:
+                session.expunge(r)
+            return rows
+
+    async def reject(self, code: str) -> Request:
+        """Mark a request rejected; logged to the log channel."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            req.status = RequestStatus.REJECTED
+            await session.flush()
+            title = req.anime_title
+            session.expunge(req)
+
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "request", "rejected", code=code, anime=title
+        )
+        return req
+
     async def list_for_user(self, telegram_id: int, *, limit: int = 20) -> list[Request]:
         async with session_scope(self._c.pg_sessionmaker) as session:
             users = UserRepository(session)

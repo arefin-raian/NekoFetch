@@ -17,6 +17,7 @@ def register_all(client: Client, container: Container) -> None:
         approvals,
         bots_admin,
         requests,
+        review,
         settings,
         staff_admin,
         start,
@@ -27,6 +28,7 @@ def register_all(client: Client, container: Container) -> None:
     install_auth_middleware(client, container)
     start.register(client, container)
     requests.register(client, container)
+    review.register(client, container)
     settings.register(client, container)
     approvals.register(client, container)
     bots_admin.register(client, container)

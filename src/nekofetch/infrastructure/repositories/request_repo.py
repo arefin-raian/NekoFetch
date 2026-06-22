@@ -16,6 +16,18 @@ class RequestRepository(BaseRepository[Request]):
         result = await self.session.execute(select(Request).where(Request.code == code))
         return result.scalar_one_or_none()
 
+    async def list_by_status(
+        self, status: RequestStatus, *, limit: int = 50
+    ) -> list[Request]:
+        """Oldest-first requests in a given status (drives the review queue)."""
+        result = await self.session.execute(
+            select(Request)
+            .where(Request.status == status)
+            .order_by(Request.created_at.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_for_user(self, user_id: int, *, limit: int = 20) -> list[Request]:
         result = await self.session.execute(
             select(Request)
