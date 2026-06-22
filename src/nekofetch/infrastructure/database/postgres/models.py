@@ -31,7 +31,12 @@ from nekofetch.domain.enums import (
     RequestStatus,
     Role,
 )
-from nekofetch.infrastructure.database.postgres.base import Base, PKMixin, TimestampMixin
+from nekofetch.infrastructure.database.postgres.base import (
+    Base,
+    EnumStr,
+    PKMixin,
+    TimestampMixin,
+)
 
 
 class User(Base, PKMixin, TimestampMixin):
@@ -40,7 +45,7 @@ class User(Base, PKMixin, TimestampMixin):
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True, nullable=False)
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str | None] = mapped_column(String(128))
-    role: Mapped[Role] = mapped_column(String(16), default=Role.USER, nullable=False)
+    role: Mapped[Role] = mapped_column(EnumStr(Role), default=Role.USER, nullable=False)
     is_approved: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     language: Mapped[str] = mapped_column(String(8), default="en", nullable=False)
@@ -66,10 +71,10 @@ class Request(Base, PKMixin, TimestampMixin):
     season: Mapped[int | None] = mapped_column(Integer)
     episodes: Mapped[list | None] = mapped_column(JSONB)             # selected episode numbers
     resolution: Mapped[str | None] = mapped_column(String(16))
-    audio: Mapped[AudioType | None] = mapped_column(String(16))
+    audio: Mapped[AudioType | None] = mapped_column(EnumStr(AudioType))
 
     status: Mapped[RequestStatus] = mapped_column(
-        String(16), default=RequestStatus.PENDING, index=True, nullable=False
+        EnumStr(RequestStatus), default=RequestStatus.PENDING, index=True, nullable=False
     )
     position: Mapped[int | None] = mapped_column(Integer)
 
@@ -82,7 +87,7 @@ class DownloadJob(Base, PKMixin, TimestampMixin):
 
     request_id: Mapped[int] = mapped_column(ForeignKey("requests.id"), index=True, nullable=False)
     status: Mapped[JobStatus] = mapped_column(
-        String(16), default=JobStatus.QUEUED, index=True, nullable=False
+        EnumStr(JobStatus), default=JobStatus.QUEUED, index=True, nullable=False
     )
     priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
 
@@ -114,7 +119,7 @@ class MediaFile(Base, PKMixin, TimestampMixin):
     season: Mapped[int | None] = mapped_column(Integer)
     episode: Mapped[int | None] = mapped_column(Integer)
     resolution: Mapped[str | None] = mapped_column(String(16))
-    audio: Mapped[AudioType | None] = mapped_column(String(16))
+    audio: Mapped[AudioType | None] = mapped_column(EnumStr(AudioType))
 
     original_name: Mapped[str | None] = mapped_column(String(512))
     final_name: Mapped[str | None] = mapped_column(String(512))
@@ -142,7 +147,7 @@ class MediaFile(Base, PKMixin, TimestampMixin):
 class DistributionBot(Base, PKMixin, TimestampMixin):
     __tablename__ = "bots"
 
-    kind: Mapped[BotKind] = mapped_column(String(16), default=BotKind.DISTRIBUTION, nullable=False)
+    kind: Mapped[BotKind] = mapped_column(EnumStr(BotKind), default=BotKind.DISTRIBUTION, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     username: Mapped[str | None] = mapped_column(String(64), index=True)
     bot_user_id: Mapped[int | None] = mapped_column(BigInteger, unique=True)
@@ -184,7 +189,7 @@ class StoragePack(Base, PKMixin, TimestampMixin):
     anime_title: Mapped[str] = mapped_column(String(256), nullable=False)
     season: Mapped[int | None] = mapped_column(Integer)
     resolution: Mapped[str] = mapped_column(String(16), nullable=False)
-    audio: Mapped[AudioType] = mapped_column(String(16), nullable=False)
+    audio: Mapped[AudioType] = mapped_column(EnumStr(AudioType), nullable=False)
 
     channel_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     header_message_id: Mapped[int | None] = mapped_column(BigInteger)
