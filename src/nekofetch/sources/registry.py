@@ -37,9 +37,10 @@ class SourceRegistry:
 
 def build_default_registry() -> SourceRegistry:
     """Register all built-in authorized sources."""
+    from nekofetch.sources.kickassanime import KickAssAnimeSource
     from nekofetch.sources.local import LocalFileSource
 
     registry = SourceRegistry()
     registry.register(LocalFileSource)
-    # Future authorized providers register here (licensed APIs, official catalogs).
+    registry.register(KickAssAnimeSource)
     return registry

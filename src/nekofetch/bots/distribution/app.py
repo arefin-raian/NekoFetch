@@ -163,7 +163,7 @@ def build_distribution_bot(
         _, args = parse_cb(q.data)
         _, data = await fsm.get(q.from_user.id)
         cache = data.get("titles", [])
-        idx = int(args[0])
+        idx = int(args[1])
         if idx >= len(cache):
             await q.answer("Unavailable", show_alert=True)
             return
@@ -235,7 +235,7 @@ def build_distribution_bot(
     @client.on_callback_query(filters.regex(r"^d\|season"))
     async def _season(_: Client, q: CallbackQuery) -> None:
         _, args = parse_cb(q.data)
-        season = int(args[0])
+        season = int(args[1])
         _, data = await fsm.get(q.from_user.id)
         doc_id = data.get("doc_id")
         variants = await dist.variants_for(doc_id, season)
@@ -252,7 +252,7 @@ def build_distribution_bot(
     @client.on_callback_query(filters.regex(r"^d\|res"))
     async def _resolution(_: Client, q: CallbackQuery) -> None:
         _, args = parse_cb(q.data)
-        res = args[0]
+        res = args[1]
         _, data = await fsm.get(q.from_user.id)
         audios = sorted({a for r, a in data.get("variants", []) if r == res})
         await fsm.update(q.from_user.id, resolution=res)
@@ -267,7 +267,7 @@ def build_distribution_bot(
     @client.on_callback_query(filters.regex(r"^d\|lang"))
     async def _language(_: Client, q: CallbackQuery) -> None:
         _, args = parse_cb(q.data)
-        audio = args[0]
+        audio = args[1]
         await fsm.update(q.from_user.id, audio=audio)
         _, data = await fsm.get(q.from_user.id)
         await q.answer()

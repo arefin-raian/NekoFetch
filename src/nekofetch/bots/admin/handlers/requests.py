@@ -86,7 +86,7 @@ def register(client: Client, container: Container) -> None:
         _, args = parse_cb(q.data)
         _, data = await fsm.get(q.from_user.id)
         cache = data.get("results", [])
-        await q.message.edit_reply_markup(_results_kb(cache, page=int(args[0])))
+        await q.message.edit_reply_markup(_results_kb(cache, page=int(args[1])))
         await q.answer()
 
     # ── pick a title -> show available content ──
@@ -95,7 +95,7 @@ def register(client: Client, container: Container) -> None:
         _, args = parse_cb(q.data)
         _, data = await fsm.get(q.from_user.id)
         cache = data.get("results", [])
-        idx = int(args[0])
+        idx = int(args[1])
         if idx >= len(cache):
             await q.answer(L("error_generic"), show_alert=True)
             return
@@ -145,10 +145,10 @@ def register(client: Client, container: Container) -> None:
     @client.on_callback_query(filters.regex(r"^req\|season"))
     async def _season(_: Client, q: CallbackQuery) -> None:
         _, args = parse_cb(q.data)
-        await fsm.update(q.from_user.id, season=int(args[0]), kind=ContentKind.SEASON.value)
+        await fsm.update(q.from_user.id, season=int(args[1]), kind=ContentKind.SEASON.value)
         await q.answer()
         await q.message.edit_text(
-            f"**{L('download_scope_header')}**\n\nSeason {args[0]}",
+            f"**{L('download_scope_header')}**\n\nSeason {args[1]}",
             reply_markup=keyboard(
                 [(L("btn_entire_series"), cb("req", "scope", "series"))],
                 [(L("btn_selected_episodes"), cb("req", "scope", "eps"))],
@@ -158,7 +158,7 @@ def register(client: Client, container: Container) -> None:
     @client.on_callback_query(filters.regex(r"^req\|kind"))
     async def _kind(_: Client, q: CallbackQuery) -> None:
         _, args = parse_cb(q.data)
-        await fsm.update(q.from_user.id, season=None, kind=args[0])
+        await fsm.update(q.from_user.id, season=None, kind=args[1])
         await q.answer()
         await q.message.edit_text(
             f"**{L('download_scope_header')}**",
@@ -169,7 +169,7 @@ def register(client: Client, container: Container) -> None:
     @client.on_callback_query(filters.regex(r"^req\|scope"))
     async def _scope(_: Client, q: CallbackQuery) -> None:
         _, args = parse_cb(q.data)
-        if args[0] == "eps":
+        if args[1] == "eps":
             await fsm.set(q.from_user.id, STATE_EPISODES, **(await fsm.get(q.from_user.id))[1])
             await q.message.edit_text("Enter episodes (e.g. 1-12, 14, 20).")
             await q.answer()

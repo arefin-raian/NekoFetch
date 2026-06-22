@@ -69,6 +69,8 @@ class EnvSettings(BaseSettings):
     @field_validator("admin_ids", mode="before")
     @classmethod
     def _split_admin_ids(cls, v: Any) -> Any:
+        if isinstance(v, int):
+            return [v]
         if isinstance(v, str):
             return [int(x) for x in v.replace(" ", "").split(",") if x]
         return v
@@ -78,6 +80,7 @@ class EnvSettings(BaseSettings):
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"?ssl=require"
         )
 
 
