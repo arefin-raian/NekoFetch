@@ -608,16 +608,31 @@ class KickAssAnimeSource(AnimeSource):
                     if "RESOLUTION=1920x108" in line or playlist_url == manifest_url:
                         playlist_url = candidate
 
+        def _estimate_total(first_seg_size: int, seg_count: int) -> int:
+            return first_seg_size * seg_count
+
         # Download video segments
         resp = await self._retry_get(playlist_url, master_headers)
         resp.raise_for_status()
+        video_seg_urls = [
+            _fix_url(line.strip(), playlist_url)
+            for line in resp.text.splitlines()
+            if not line.startswith("#") and line.strip()
+        ]
+        video_total = len(video_seg_urls)
         video_segments: list[bytes] = []
-        for line in resp.text.splitlines():
-            if not line.startswith("#") and line.strip():
-                seg_url = _fix_url(line, playlist_url)
-                sr = await self._retry_get(seg_url, seg_headers, retries=3)
-                sr.raise_for_status()
-                video_segments.append(sr.content)
+        video_bytes = 0
+        vid_total_est = 0
+        for idx, seg_url in enumerate(video_seg_urls):
+            sr = await self._retry_get(seg_url, seg_headers, retries=3)
+            sr.raise_for_status()
+            video_segments.append(sr.content)
+            video_bytes += len(sr.content)
+            if idx == 0:
+                vid_total_est = _estimate_total(len(sr.content), video_total)
+            if on_progress and vid_total_est:
+                await on_progress(video_bytes, vid_total_est)
+
         video_ts = dest.parent / f".{dest.stem}.video.ts"
         video_ts.write_bytes(b"".join(video_segments))
         del video_segments
@@ -631,13 +646,25 @@ class KickAssAnimeSource(AnimeSource):
             log.info("Downloading audio: %s", audio_name)
             resp = await self._retry_get(audio_url, master_headers)
             resp.raise_for_status()
+            audio_seg_urls = [
+                _fix_url(line.strip(), audio_url)
+                for line in resp.text.splitlines()
+                if not line.startswith("#") and line.strip()
+            ]
+            audio_total = len(audio_seg_urls)
             audio_parts: list[bytes] = []
-            for line in resp.text.splitlines():
-                if not line.startswith("#") and line.strip():
-                    seg_url = _fix_url(line, audio_url)
-                    sr = await self._retry_get(seg_url, seg_headers, retries=3)
-                    sr.raise_for_status()
-                    audio_parts.append(sr.content)
+            audio_bytes = video_bytes
+            total_est = vid_total_est
+            for idx, seg_url in enumerate(audio_seg_urls):
+                sr = await self._retry_get(seg_url, seg_headers, retries=3)
+                sr.raise_for_status()
+                audio_parts.append(sr.content)
+                audio_bytes += len(sr.content)
+                if idx == 0 and vid_total_est:
+                    total_est = vid_total_est + _estimate_total(len(sr.content), audio_total)
+                if on_progress and total_est:
+                    await on_progress(audio_bytes, total_est)
+
             audio_ts = dest.parent / f".{dest.stem}.audio.ts"
             audio_ts.write_bytes(b"".join(audio_parts))
             del audio_parts
