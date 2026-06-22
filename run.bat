@@ -55,6 +55,9 @@ if not exist ".env" (
 
 REM --- run ----------------------------------------------------
 echo [NekoFetch] Starting... ^(press Ctrl+C to stop^)
+REM Ensure ffmpeg is reachable (ShareX bundling, manual install, or winget).
+if not exist "%VENV_PY%" exit /b 1
+where ffmpeg >nul 2>&1 || set "PATH=%PATH%;C:\Program Files\ShareX"
 "%VENV_PY%" -m nekofetch
 
 echo.
