@@ -82,7 +82,17 @@ class Container:
         if self.env.auto_create_schema:
             await create_all(self.pg_engine)  # dev convenience; Alembic owns prod schema
 
-        self.mongo = AsyncIOMotorClient(self.env.mongo_uri)[self.env.mongo_db]
+        try:
+            self.mongo = AsyncIOMotorClient(
+                self.env.mongo_uri,
+                serverSelectionTimeoutMS=15000,
+                connectTimeoutMS=10000,
+            )[self.env.mongo_db]
+            await self.mongo.list_collection_names()  # force connection check
+        except Exception as exc:
+            log.error("mongo.connect.failed", error=str(exc))
+            raise
+        self.collections = Collections(self.mongo)
         self.collections = Collections(self.mongo)
         await self.collections.ensure_indexes()
 
