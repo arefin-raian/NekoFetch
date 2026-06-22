@@ -27,11 +27,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Optional native speedup. Requires a C compiler to build (MSVC Build Tools on
-# Windows). Install with: pip install -e ".[speedups]". Without it the bot runs
-# fine, just with slower pure-Python MTProto crypto.
+# Native speedup — Rust rewrite of TgCrypto with pre-built wheels for all
+# platforms (no C compiler needed). Speeds up Pyrogram's MTProto crypto.
 speedups = [
-    "tgcrypto>=1.2.5",
+    "TgCryptoX>=1.0.1",
 ]
 dev = [
     "ruff>=0.4.0",

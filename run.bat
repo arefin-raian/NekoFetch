@@ -39,9 +39,9 @@ if errorlevel 1 (
     REM Optional native speedup ^(TgCrypto^). Needs a C compiler, so it is best-effort:
     REM a failure here is harmless — Pyrogram falls back to pure-Python crypto.
     "%VENV_PY%" -m pip install -e ".[speedups]" >nul 2>&1 && (
-        echo [NekoFetch] TgCrypto speedup installed.
+        echo [NekoFetch] TgCryptoX speedup installed.
     ) || (
-        echo [NekoFetch] TgCrypto speedup skipped ^(no C compiler^) — running without it is fine.
+        echo [NekoFetch] TgCryptoX speedup skipped — running without it is fine.
     )
 )
 
