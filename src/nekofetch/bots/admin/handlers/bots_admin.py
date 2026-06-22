@@ -91,8 +91,10 @@ def register(client: Client, container: Container) -> None:
         )
 
     # Separate group so this coexists with the request-flow text handler.
-    @client.on_message(filters.text & ~filters.command(["start"]), group=1)
+    @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=1)
     async def _token(_: Client, message: Message) -> None:
+        if not message.from_user:
+            return
         state, data = await fsm.get(message.from_user.id)
         user = getattr(message, "nf_user", None)
         if state not in (STATE_TOKEN, STATE_BIND):

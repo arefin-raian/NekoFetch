@@ -102,8 +102,10 @@ def register(client: Client, container: Container) -> None:
         await _render(q)
 
     # Group 6 so it coexists with the other stateful text handlers.
-    @client.on_message(filters.text & ~filters.command(["start"]), group=6)
+    @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=6)
     async def _add_input(_: Client, message: Message) -> None:
+        if not message.from_user:
+            return
         state, _ = await fsm.get(message.from_user.id)
         if state != STATE_ADD or not _can(message, Permission.MANAGE_STAFF):
             return

@@ -99,8 +99,10 @@ def register(client: Client, container: Container) -> None:
         await q.message.edit_text("**▸ Storage Packs**\n\n" + "\n".join(lines))
 
     # Group 2 so it coexists with request-flow (0) and bot-token (1) text handlers.
-    @client.on_message(filters.text & ~filters.command(["start"]), group=2)
+    @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=2)
     async def _index_input(_: Client, message: Message) -> None:
+        if not message.from_user:
+            return
         state, _ = await fsm.get(message.from_user.id)
         if state != STATE_INDEX:
             return

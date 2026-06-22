@@ -43,8 +43,10 @@ def register(client: Client, container: Container) -> None:
         await q.answer()
 
     # ── text router for FSM states (non-command text) ──
-    @client.on_message(filters.text & ~filters.command(["start"]))
+    @client.on_message(filters.text & filters.private & ~filters.command(["start"]))
     async def _text(_: Client, message: Message) -> None:
+        if not message.from_user:
+            return
         state, data = await fsm.get(message.from_user.id)
         if state == STATE_NAME:
             await _do_search(message, message.text.strip())
