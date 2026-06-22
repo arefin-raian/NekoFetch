@@ -651,6 +651,7 @@ pytest on every push and PR.
 | Metadata cards missing | `providers/metadata/scraper.py` still has `implemented = False` (expected) |
 | Access link does nothing | `shortlink.linkvertise_user_id` not set, or `access.enabled = false` |
 | Build fails on a PaaS | install `ffmpeg`; ensure Rust toolchain for some wheels (Termux) |
+| `Microsoft Visual C++ 14.0 … is required` (Windows) | only the optional `tgcrypto` speedup needs a compiler — it's **not** required. A plain `pip install -e .` (and `run.bat`) skips it; the bot runs on pure-Python crypto. To add the speedup, install [MS C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) then `pip install -e ".[speedups]"`. |
 
 ---
 

@@ -7,7 +7,9 @@ readme = "README.md"
 
 dependencies = [
     "pyrogram>=2.0.106",
-    "tgcrypto>=1.2.5",
+    # NOTE: TgCrypto is an optional C-extension speedup (see the "speedups" extra).
+    # It is intentionally NOT a hard dependency so installs work without a C compiler
+    # (e.g. Windows without MSVC Build Tools). Pyrogram falls back to pure-Python AES.
     "sqlalchemy[asyncio]>=2.0.30",
     "asyncpg>=0.29.0",
     "alembic>=1.13.0",
@@ -24,6 +26,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Optional native speedup. Requires a C compiler to build (MSVC Build Tools on
+# Windows). Install with: pip install -e ".[speedups]". Without it the bot runs
+# fine, just with slower pure-Python MTProto crypto.
+speedups = [
+    "tgcrypto>=1.2.5",
+]
 dev = [
     "ruff>=0.4.0",
     "mypy>=1.10.0",
