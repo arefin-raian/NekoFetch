@@ -63,8 +63,12 @@ REM Kill stale bot process and unlock its SQLite session file.
 taskkill /f /im python.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 if exist "C:\data\sessions" (
-    del /q "C:\data\sessions\*.session" 2>nul
-    del /q "C:\data\sessions\*" 2>nul
+    REM Remove stale lock files but keep the .session itself — Pyrogram needs
+    REM the cached peer access_hashes for private channels. Deleting them
+    REM on every restart causes permanent 'Peer id invalid' errors.
+    del /q "C:\data\sessions\*.session-journal" 2>nul
+    del /q "C:\data\sessions\*.session-shm" 2>nul
+    del /q "C:\data\sessions\*.lock" 2>nul
 )
 
 "%VENV_PY%" -m nekofetch
