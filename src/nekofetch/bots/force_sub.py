@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pyrogram import Client
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from nekofetch.core.container import Container
@@ -55,13 +56,13 @@ async def check_with_animation(
     client: Client, container: Container, message: Message
 ) -> list[tuple[str, str | None]]:
     msg = await message.reply(
-        "<code>ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ!</code>", parse_mode="html"
+        "<code>ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ!</code>", parse_mode=ParseMode.HTML
     )
     await loading_animation(msg, "ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ")
     pending = await channels_to_join(client, container, message.from_user.id)
     if not pending:
         await msg.edit_text(
             bq("<b>🔒 sᴜʙsᴄʀɪᴘᴛɪᴏɴ sᴛᴀᴛᴜs: ᴘᴀssᴇᴅ</b>"),
-            parse_mode="html",
+            parse_mode=ParseMode.HTML,
         )
     return pending

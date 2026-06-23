@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
+from pyrogram.enums import ParseMode
 from pyrogram.errors import MessageNotModified
 from pyrogram.types import Message
 
@@ -28,7 +29,7 @@ def labeled_html(label: str, percent: float, *, width: int = 10) -> str:
 async def loading_animation(msg: Message, label: str, steps: int = 3, delay: float = 0.35) -> None:
     for i in range(1, steps + 1):
         try:
-            await msg.edit_text(f"<code>{label}{'!' * i}</code>", parse_mode="html")
+            await msg.edit_text(f"<code>{label}{'!' * i}</code>",         parse_mode=ParseMode.HTML)
         except MessageNotModified:
             pass
         await asyncio.sleep(delay)
@@ -38,7 +39,7 @@ async def staged_loading(msg: Message, stages: list[str], delay_per_stage: float
     for stage in stages:
         for dots in range(1, 4):
             try:
-                await msg.edit_text(f"<code>{stage}{'!' * dots}</code>", parse_mode="html")
+                await msg.edit_text(f"<code>{stage}{'!' * dots}</code>",         parse_mode=ParseMode.HTML)
             except MessageNotModified:
                 pass
             await asyncio.sleep(delay_per_stage / 3)
