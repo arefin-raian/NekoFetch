@@ -2,13 +2,15 @@
 
 # ◈ NekoFetch
 
-**A premium, configuration-driven Telegram distribution platform for video content you own or are licensed to distribute.**
-
 [![CI](https://github.com/arefin-raian/NekoFetch/actions/workflows/ci.yml/badge.svg)](https://github.com/arefin-raian/NekoFetch/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![Async](https://img.shields.io/badge/architecture-async--first-success)
 ![Telegram](https://img.shields.io/badge/Telegram-Pyrogram-26A5E4)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+**A multi-tenant Telegram bot platform for authorized video distribution.**  
+Runs dozens of bots in one process — request → acquire → process → approve → publish → deliver.  
+Every toggle lives in config or a Telegram admin panel. No code changes needed.
 
 </div>
 
@@ -16,21 +18,11 @@
 
 > ## ⚠️ Scope & Legitimacy — read this first
 >
-> NekoFetch is built **only** for *authorized* distribution. Content enters the system
-> through a pluggable **source interface** (`nekofetch.sources`) with reference
-> implementations for **authorized sources only** — local ingestion of files you own, or
-> HTTP/official APIs you control or are licensed to use. The repository ships **no** plugin
-> that scrapes pirate streaming sites, and the metadata-acquisition layer is a deliberately
-> empty seam you implement yourself against a source you are authorized to use.
+> NekoFetch is built **only** for *authorized* distribution. Content enters the system through a pluggable **source interface** (`nekofetch.sources`) with reference implementations for **authorized sources only** — local ingestion of files you own, or HTTP/official APIs you control or are licensed to use. The repository ships **no** plugin that scrapes pirate streaming sites, and the metadata-acquisition layer is a deliberately empty seam you implement yourself against a source you are authorized to use.
 >
-> **The `kickassanime` source included in this repository is for development/testing only.**
-> Due to budget constraints during development, a free anime source was implemented as a
-> placeholder. This is intended **solely for personal testing** and should be replaced with
-> a properly licensed content source before any production or public deployment. You must
-> implement your own `AnimeSource` subclass for your authorized content library.
+> **The `kickassanime` source included in this repository is for development/testing only.** Due to budget constraints during development, a free anime source was implemented as a placeholder. This is intended **solely for personal testing** and should be replaced with a properly licensed content source before any production or public deployment. You must implement your own `AnimeSource` subclass for your authorized content library.
 >
-> **You are solely responsible** for ensuring you hold the rights to any content you ingest
-> or distribute through this software, and for complying with all applicable terms of service.
+> **You are solely responsible** for ensuring you hold the rights to any content you ingest or distribute through this software, and for complying with all applicable terms of service.
 
 ---
 
@@ -45,17 +37,20 @@
 7. [The Pluggable Seams](#the-pluggable-seams)
 8. [Prerequisites](#prerequisites)
 9. [Configuration](#configuration)
+   - [Environment Variables (`.env`)](#environment-variables-env)
+   - [`config.yaml` — behaviour](#configyaml--behaviour)
+   - [Live settings panel](#live-settings-panel)
 10. [Quick Start (Docker)](#quick-start-docker)
 11. [Deployment Guides](#deployment-guides)
-    - [Docker Compose (VPS / local)](#a-docker-compose--vps--local--recommended)
-    - [Linux (manual + systemd)](#b-linux-manual--systemd)
-    - [Windows](#c-windows)
+    - [Docker Compose — anywhere with Docker (recommended)](#a-docker-compose--anywhere-with-docker-recommended)
+    - [Linux — manual + systemd](#b-linux-manual--systemd)
+    - [Windows — native or WSL](#c-windows-native-or-wsl)
     - [Termux / Android](#d-termux--android)
-    - [Render](#e-render)
+    - [Render (Background Worker)](#e-render-background-worker)
     - [Railway](#f-railway)
     - [Koyeb](#g-koyeb)
     - [Fly.io](#h-flyio)
-    - [Managed / external services](#managed--external-data-services-free-tiers)
+    - [Managed / external data services (free tiers)](#managed--external-data-services-free-tiers)
 12. [Database Migrations](#database-migrations)
 13. [Channel Setup](#channel-setup)
 14. [Using the Admin Bot](#using-the-admin-bot)
@@ -69,24 +64,26 @@
 
 ## What is NekoFetch?
 
-NekoFetch is a **multi-tenant Telegram bot ecosystem**. It consists of:
+NekoFetch is a **multi-tenant Telegram bot platform** for distributing video content you are authorized to share. It runs as a single long-lived Python process that boots one admin bot + N distribution bots, a download worker, a processing pipeline, and a scheduler — all on one event loop.
 
-- **One private Admin bot** — your management cockpit: request queue, download dashboard,
-  processing pipeline, content approval/publishing, analytics, staff management, broadcast,
-  and a full in-Telegram settings panel.
-- **Any number of public Distribution bots** — generated on demand from a BotFather token,
-  each a searchable content library with a premium UX (poster → season → quality → language
-  → delivery).
+The admin bot is your cockpit:
+- Accept requests from users, manage the download queue, approve/reprocess/cancel finished content
+- Spawn distribution bots on demand (paste a BotFather token, bind a title, done)
+- Toggle every feature live from inside Telegram — no file editing, no restart
 
-Around those bots sits a complete backend: an **acquisition layer** (authorized sources),
-a **processing pipeline** (verify → rename → metadata → branding → watermark → thumbnail →
-store), **channel-based storage & delivery**, **time-based access control**, and a
-**configuration-first** design where almost everything is toggleable at runtime — from a
-file or from inside Telegram, without touching code.
+Each distribution bot is a standalone searchable library with a premium UX: poster cards → season selection → quality × language chooser → delivery. Everything goes through Telegram's MTProto — no HTTP server, no webhooks, no public port needed.
 
-It is designed to feel **closer to a premium SaaS platform than a typical Telegram bot**:
-animated progress, live message-edit dashboards, inline pagination, elegant typography, and
-minimal emoji.
+Beneath the bots sits a full backend:
+- **Pluggable source seam** — implement `AnimeSource` for your authorized content library
+- **Acquisition matrix** — fans out unresolved requests into every quality × language combo
+- **Processing pipeline** — verify → rename → metadata → branding → watermark → thumbnail → store
+- **Channel-based storage** — content is stored as ordered Telegram message packs (header → files → end sticker) in a private database channel
+- **Time-based access control** — free trial → shortlink token → renew
+- **Full notification system** — users get DM alerts on download complete, processing complete, publish, or failure; admin gets Telegram alerts on bot/channel failures
+- **Live log channel** — two auto-updated pinned messages (dashboard + catalog), every event tracked in HTML with inline blockquotes
+- **Premium UI** — Unicode small-caps typography, bold serif headings, `<blockquote>` wrapping, dot-escalation loading animations, spoiler welcome screens
+
+Everything is togglable at runtime from `config.yaml` or the Telegram settings panel. No code changes to adapt the platform to your workflow.
 
 ---
 
@@ -97,9 +94,11 @@ minimal emoji.
 
 **Distribution & UX**
 - Multi-bot runtime (run dozens of bots in one process)
-- Premium UX kit: `▰▱` progress bars, paginated menus, live dashboards
+- Premium UX kit: Unicode small-caps typography, blockquote HTML, `▰▱` progress bars
+- Dot-escalation loading animations on every async operation
 - Season-centric **package delivery** (not episode-by-episode)
 - Poster → Season → Quality → Language → Deliver
+- Spoiler welcome screen with sticker animation
 - Force-subscribe gate, auto-delete, protected content
 
 </td><td>
@@ -107,18 +106,20 @@ minimal emoji.
 **Content Pipeline**
 - Authorized-only **source seam** (local + your APIs)
 - Multi-quality × multi-language **acquisition matrix**
-- Resumable downloads with live progress
+- Resumable downloads with live progress (per-episode tracking)
 - verify → rename → metadata → branding → watermark → thumbnail → store
 - Admin **approval** before anything goes public
 
 </td></tr>
 <tr><td>
 
-**Channels**
-- **Database channel** — content stored as ordered packs (`header → files → end sticker`)
-- **Main channel** — auto-posted cards with `[Index] [Download]`
+**Channels & Notifications**
+- **Database channel** — content stored as ordered packs (header → files → end sticker)
+- **Main channel** — auto-posted cards with [Index] [Download] buttons
 - **Index channel** — stylized, auto-maintained per-letter index
-- **Log channel** — every event + 2 auto-updated pinned messages
+- **Log channel** — every event in HTML with blockquotes, 2 auto-updated pinned messages (dashboard + catalog)
+- **User notifications** — DM alerts on download complete, processing complete, publish, and failures
+- **Admin alerts** — Telegram DMs on bot start failures, channel peer resolution exhaustion
 
 </td><td>
 
@@ -302,6 +303,10 @@ flowchart TD
     F --> H["Update INDEX CHANNEL (per-letter entry)"]
     F --> I["Auto-brand & launch bound DISTRIBUTION BOT"]
     F --> J["Stream events to LOG CHANNEL"]
+    D -.-> K["Notify user: download complete"]
+    D -.-> L["Notify user: processing complete / failed"]
+    F -.-> M["Notify user: content published"]
+    E -.-> N["Admin alert: channel failure / bot failure"]
     G --> K([User taps Download → opens bot])
     K --> L{Force-subscribe + ACCESS check<br/>trial / token}
     L -->|granted| M["Season → Quality → Language"]
@@ -351,107 +356,143 @@ NekoFetch has **three configuration layers**, in increasing precedence:
 .env  (secrets)   →   config.yaml  (behaviour)   →   in-bot Settings panel  (live overrides, stored in Mongo)
 ```
 
-### `.env` — secrets & connection strings
+### Environment Variables (`.env`)
 
 ```bash
 cp .env.example .env
+# then edit .env with your values
 ```
 
-| Variable | Description |
-|---|---|
-| `TELEGRAM_API_ID`, `TELEGRAM_API_HASH` | from my.telegram.org |
-| `ADMIN_BOT_TOKEN` | BotFather token for the management bot |
-| `ADMIN_IDS` | comma-separated Telegram user ids with full admin |
-| `SECRET_KEY` | Fernet key — `python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"` |
-| `POSTGRES_HOST/PORT/USER/PASSWORD/DB` | PostgreSQL connection |
-| `MONGO_URI`, `MONGO_DB` | MongoDB connection |
-| `REDIS_URL` | e.g. `redis://localhost:6379/0` |
-| `STORAGE_PATH`, `SESSION_PATH` | media + Pyrogram session directories |
-| `LOG_LEVEL`, `LOG_JSON` | logging verbosity / JSON output |
-| `AUTO_CREATE_SCHEMA` | `true` for dev (auto-create tables); `false` in prod (use Alembic) |
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `TELEGRAM_API_ID` | **Yes** | — | From [my.telegram.org](https://my.telegram.org) — create an app |
+| `TELEGRAM_API_HASH` | **Yes** | — | From my.telegram.org |
+| `ADMIN_BOT_TOKEN` | **Yes** | — | BotFather token for the management bot |
+| `ADMIN_IDS` | **Yes** | — | Comma-separated Telegram user IDs with full admin access |
+| `SECRET_KEY` | **Yes** | — | Fernet key — run: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `POSTGRES_HOST` | No | `postgres` | PostgreSQL host |
+| `POSTGRES_PORT` | No | `5432` | PostgreSQL port |
+| `POSTGRES_USER` | No | `nekofetch` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | No | `change-me` | PostgreSQL password |
+| `POSTGRES_DB` | No | `nekofetch` | PostgreSQL database name |
+| `MONGO_URI` | No | `mongodb://mongo:27017` | MongoDB connection string |
+| `MONGO_DB` | No | `nekofetch` | MongoDB database name |
+| `REDIS_URL` | No | `redis://redis:6379/0` | Redis connection string |
+| `STORAGE_PATH` | No | `/data/storage` | Directory for downloaded media files |
+| `SESSION_PATH` | No | `/data/sessions` | Directory for Pyrogram `.session` files |
+| `LOG_LEVEL` | No | `INFO` | One of `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_JSON` | No | `false` | Set `true` for JSON log output (production) |
+| `AUTO_CREATE_SCHEMA` | No | `true` | `true` = auto-create tables on startup (dev); `false` = use Alembic migrations (prod) |
 
-### `config.yaml` — feature toggles & behaviour
+Only the 5 **Yes** variables are strictly required. Everything else has sensible defaults for the Docker Compose stack and only needs changing when pointing at external/managed databases or custom paths.
 
-Every major subsystem is a section you can tune or disable. Highlights:
+### `config.yaml` — behaviour
+
+Every major subsystem is a section you can tune or disable:
 
 | Section | Controls |
 |---|---|
-| `features` | master on/off switches for whole subsystems |
-| `downloads` | concurrency, retries, resume, progress interval |
-| `acquisition` | the quality × language matrix + English-subs enforcement |
-| `processing` / `rename` / `metadata` / `thumbnail` / `watermark` | the pipeline stages |
-| `branding` | channel name, footer, watermark text, metadata author |
-| `distribution` | season packages, protect content, temporary links, auto-delete |
-| `storage_channel` | the database channel (header template, end sticker, copy mode) |
-| `log_channel` | log routing + pinned dashboard/catalog |
-| `main_channel` / `index_channel` | public post caption + index posts |
-| `access` / `shortlink` | trial + token renewal + Linkvertise |
-| `security` | rate limiting, anti-spam, force-subscribe |
-| `sources` | which authorized sources are enabled |
+| `features` | Master on/off switches for whole subsystems |
+| `downloads` | Concurrency, retries, resume, progress interval |
+| `acquisition` | Quality × language matrix + English-subs enforcement |
+| `processing` / `rename` / `metadata` / `thumbnail` / `watermark` | Pipeline stages, each independently toggleable |
+| `branding` | Channel name, footer text, watermark text, metadata author |
+| `distribution` | Season packages, protected content, temporary links, auto-delete |
+| `storage_channel` | Database channel config (header template, end sticker, copy mode) |
+| `log_channel` | Event routing + pinned dashboard/catalog |
+| `main_channel` / `index_channel` | Public post caption template + index styling |
+| `access` / `shortlink` | Trial duration, token lifetime, Linkvertise provider config |
+| `security` | Rate limiting, anti-spam cooldown, force-subscribe, owner id |
+| `ui` | Start sticker ID, welcome image, loading animation delays |
+| `sources` | Authorized source enable/disable |
 
-Channel-dependent features (`storage_channel`, `log_channel`, `main_channel`,
-`index_channel`, `access`, `shortlink`) ship **disabled** — turn them on once configured.
+Channel-dependent features (`storage_channel`, `log_channel`, `main_channel`, `index_channel`, `access`, `shortlink`) ship **disabled** — turn them on once the channels are set up.
 
 ### Live settings panel
 
-Admins can flip feature toggles and edit branding **from inside Telegram** (Admin Panel →
-Settings). Changes apply immediately and persist to MongoDB.
+Admins can flip feature toggles and edit branding **from inside Telegram** (Admin Panel → Settings). Changes apply immediately and persist to MongoDB without a restart.
 
 ---
 
-## Quick Start (Docker)
+## Quick Start (Docker Compose)
 
-The fastest path — brings up Postgres, Mongo, Redis, and NekoFetch together:
+The fastest path — works on **Linux, Windows (Docker Desktop), macOS**, and any VPS:
 
 ```bash
 git clone https://github.com/arefin-raian/NekoFetch.git
 cd NekoFetch
-cp .env.example .env            # fill in API id/hash, ADMIN_BOT_TOKEN, ADMIN_IDS, SECRET_KEY
-# review config.yaml (defaults are sensible)
+cp .env.example .env
+```
+
+Edit `.env` — you need **5 values**:
+- `TELEGRAM_API_ID` + `TELEGRAM_API_HASH` from [my.telegram.org](https://my.telegram.org)
+- `ADMIN_BOT_TOKEN` from [@BotFather](https://t.me/BotFather)
+- `ADMIN_IDS` — your Telegram user ID (get it from [@userinfobot](https://t.me/userinfobot))
+- `SECRET_KEY` — generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+
+```bash
 docker compose up -d
 docker compose logs -f nekofetch
 ```
 
-When you see `bots.admin.started`, open your admin bot and send `/start`. Because your id is
-in `ADMIN_IDS`, you'll see the **Admin Panel**.
+When you see `bots.admin.started`, open your admin bot and send `/start`.  
+That's it. Everything — Postgres, Mongo, Redis, the app — is running.
+
+```
+# Update later:
+git pull && docker compose build && docker compose up -d
+```
+
+> **No Docker?** If your platform doesn't support Docker (e.g. Termux, some free tiers), use managed databases and run the app natively — see the platform-specific guides below.
 
 ---
 
 ## Deployment Guides
 
-> NekoFetch runs as a **long-lived worker process** (`python -m nekofetch`) — it does **not**
-> expose an HTTP port. On platforms whose free tier requires a bound port, run it as a
-> **Background Worker** (Render/Railway support this) or add a tiny health endpoint.
+NekoFetch is a **long-lived worker process** (`python -m nekofetch`) — it does **not** expose an HTTP port. On platforms whose free tier requires a bound port, run as a **Background Worker** or add a minimal health endpoint.
 
-### A. Docker Compose — VPS / local — *recommended*
+### A. Docker Compose — anywhere with Docker (recommended)
 
-Already covered in [Quick Start](#quick-start-docker). For a VPS, that's the whole deployment.
-Persist the named volumes (`pgdata`, `mongodata`, `redisdata`, `storage`, `sessions`) for durability.
+Works identically on:
+- **Linux** (Ubuntu, Debian, Arch, etc.)
+- **Windows** (Docker Desktop + WSL2 backend)
+- **macOS** (Docker Desktop)
+- **Any VPS** with Docker installed
+
+Steps are the [Quick Start](#quick-start-docker-compose) above. Named volumes persist data across restarts. For a VPS:
 
 ```bash
-# update later:
+# First time
+apt install docker docker-compose-plugin
+git clone https://github.com/arefin-raian/NekoFetch.git && cd NekoFetch
+# edit .env, then:
+docker compose up -d
+
+# Updates
 git pull && docker compose build && docker compose up -d
 ```
 
-### B. Linux (manual + systemd)
+### B. Linux — manual + systemd
+
+For bare-metal Linux without Docker:
 
 ```bash
-# 1. system deps (Debian/Ubuntu)
+# 1. System deps (Debian/Ubuntu)
 sudo apt update && sudo apt install -y python3.12 python3.12-venv ffmpeg mkvtoolnix \
     postgresql redis-server
-#    MongoDB: install from the official MongoDB apt repo, or use Atlas (see below)
+# MongoDB: install from the official MongoDB apt repo, or use Atlas (free tier)
 
-# 2. app
+# 2. App setup
 git clone https://github.com/arefin-raian/NekoFetch.git && cd NekoFetch
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env   # edit
+cp .env.example .env   # edit with your secrets
 
-# 3. run
+# 3. Run (foreground)
 python -m nekofetch
 ```
 
-**Run it as a service** — `/etc/systemd/system/nekofetch.service`:
+**Systemd service** — `/etc/systemd/system/nekofetch.service`:
 
 ```ini
 [Unit]
@@ -474,10 +515,12 @@ sudo systemctl daemon-reload && sudo systemctl enable --now nekofetch
 journalctl -u nekofetch -f
 ```
 
-### C. Windows
+### C. Windows — native or WSL
+
+**Option 1 — Native Python (simpler):**
 
 ```powershell
-# Install Python 3.12 (python.org) and ffmpeg (gyan.dev or `winget install ffmpeg`).
+# Install Python 3.12 from python.org, ffmpeg from gyan.dev or `winget install ffmpeg`
 git clone https://github.com/arefin-raian/NekoFetch.git
 cd NekoFetch
 py -3.12 -m venv .venv
@@ -487,95 +530,106 @@ copy .env.example .env   # edit with Notepad
 python -m nekofetch
 ```
 
-For databases on Windows, the simplest route is **Docker Desktop** (`docker compose up -d`
-for just the DBs) or **managed/external services**. Keep the window open, or wrap it with
-[NSSM](https://nssm.cc/) to run as a Windows service.
-
-### D. Termux / Android
-
-> MongoDB has **no native Android build**, and running Postgres+Mongo+Redis on a phone is
-> heavy. The realistic approach on Termux is to run **only the Python app** and point it at
-> **managed/external databases** (free tiers below). Alternatively use `proot-distro` to run
-> a full Debian.
-
-**Recommended — app on Termux, databases in the cloud:**
-
-```bash
-pkg update && pkg upgrade
-pkg install python git ffmpeg rust binutils   # rust/binutils help build some wheels
-git clone https://github.com/arefin-raian/NekoFetch.git && cd NekoFetch
-pip install -e .
-cp .env.example .env
-# In .env, point POSTGRES_*/MONGO_URI/REDIS_URL at Neon + Atlas + Upstash, set AUTO_CREATE_SCHEMA=true
+For databases on Windows, the easiest path is **Docker Desktop** just for the DBs:
+```powershell
+docker compose up -d postgres mongo redis
 python -m nekofetch
 ```
 
-Keep it alive with `termux-wake-lock` and run inside `tmux` so it survives the app closing.
+Or use **managed/external services** (Neon + Atlas + Upstash) and skip Docker entirely.  
+To run as a background service, wrap with [NSSM](https://nssm.cc/).
 
-**Alternative — full stack via proot:**
+**Option 2 — WSL2 + Docker (recommended for Windows):**  
+Follow the Docker Compose guide inside an Ubuntu WSL2 terminal. Docker Desktop on Windows handles the VM, and all commands are identical to the Linux guide.
+
+### D. Termux / Android
+
+> MongoDB has no native Android build. Run the app on Termux with cloud-hosted databases.
 
 ```bash
-pkg install proot-distro
-proot-distro install debian
-proot-distro login debian
-# inside Debian, follow the Linux guide (B)
+pkg update && pkg upgrade
+pkg install python git ffmpeg rust binutils
+git clone https://github.com/arefin-raian/NekoFetch.git && cd NekoFetch
+pip install -e .
+cp .env.example .env
 ```
 
-### E. Render
+Edit `.env` to point at managed databases (see [external services](#managed--external-data-services-free-tiers)). Set `AUTO_CREATE_SCHEMA=true`.
 
-Render offers managed **PostgreSQL** and **Key Value (Redis)**; use **MongoDB Atlas** for Mongo.
+```bash
+python -m nekofetch
+```
 
-1. Create a **PostgreSQL** instance and a **Key Value** instance on Render; create a free
-   **Atlas** cluster for Mongo.
-2. **New → Background Worker** → connect this repo.
-   - **Runtime:** Docker (uses the included `Dockerfile`), or Python with
-     `Build: pip install -e .` and `Start: python -m nekofetch`.
-3. Add environment variables (from `.env`), pointing `POSTGRES_*`, `MONGO_URI`, `REDIS_URL`
-   at the managed instances. Set `AUTO_CREATE_SCHEMA=true` for the first deploy.
-4. Add a **persistent disk** mounted at `/data` so Pyrogram sessions + media survive restarts.
+Keep alive with `termux-wake-lock`; run inside `tmux` so it survives the app closing.
 
-> A Background Worker (no public port) fits NekoFetch best. The free tier is web-services-only;
-> for a free port-bound deploy, add a minimal health server or use a paid worker.
+```bash
+pkg install tmux
+tmux new -s nekofetch
+python -m nekofetch
+# Ctrl+B, D to detach. `tmux attach -t nekofetch` to reattach.
+```
+
+### E. Render (Background Worker)
+
+Render offers managed PostgreSQL + Redis (Key Value). Use MongoDB Atlas for Mongo.
+
+1. Create a **PostgreSQL** instance and a **Key Value** instance on Render.
+2. Create a free **MongoDB Atlas** M0 cluster.
+3. **New → Background Worker** → connect your GitHub repo.
+   - **Runtime:** Docker (uses the included `Dockerfile`)
+   - Or **Native Python:** Build = `pip install -e .`, Start = `python -m nekofetch`
+4. Add all env vars from `.env`, pointing `POSTGRES_*` at your Render PG, `MONGO_URI` at Atlas, `REDIS_URL` at Render Key Value.
+5. Set `AUTO_CREATE_SCHEMA=true` for the first deploy.
+6. Attach a **persistent disk** mounted at `/data` for Pyrogram sessions and media storage.
+
+> Render's free tier is web-services-only; Background Workers require a paid plan. For a free deploy, add a lightweight health endpoint or use Railway's free tier instead.
 
 ### F. Railway
 
-Railway has first-class **PostgreSQL**, **Redis**, and **MongoDB** plugins.
+Railway has first-class PostgreSQL, Redis, and MongoDB plugins.
 
 1. **New Project → Deploy from GitHub repo** → select NekoFetch.
 2. **+ New → Database** three times: PostgreSQL, Redis, MongoDB.
-3. In the NekoFetch service **Variables**, reference the plugin vars (Railway injects
-   `PGHOST`, `REDIS_URL`, `MONGO_URL`, …) into NekoFetch's expected names
-   (`POSTGRES_*`, `REDIS_URL`, `MONGO_URI`) plus your Telegram secrets.
-4. **Start command:** `python -m nekofetch` (or let it use the Dockerfile).
-5. Add a **Volume** mounted at `/data` for sessions/media.
+3. In the NekoFetch service **Variables** tab, add:
+   - All Telegram secrets (`TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `ADMIN_BOT_TOKEN`, `ADMIN_IDS`, `SECRET_KEY`)
+   - Railway auto-injects `PGHOST`, `REDIS_URL`, `MONGO_URL` — map them:
+     - `POSTGRES_HOST` = `${{ Railway PG Host }}`
+     - `MONGO_URI` = `${{ Railway Mongo URI }}`
+     - `REDIS_URL` = `${{ Railway Redis URL }}`
+4. **Start command:** `python -m nekofetch`
+5. Attach a **Volume** at `/data` for sessions + media.
 
 ### G. Koyeb
 
-1. Create a managed **Postgres** on Koyeb; use **Atlas** (Mongo) + **Upstash** (Redis).
-2. **Create Service → GitHub → NekoFetch**, builder = Docker.
-3. Set it as a **Worker** (no ports), add env vars, attach a persistent volume at `/data`.
+1. Create a managed Postgres on Koyeb.
+2. Use **Atlas** (MongoDB free tier) + **Upstash** (Redis free tier).
+3. **Create Service → GitHub → NekoFetch**, builder = Docker.
+4. Set service type to **Worker** (no port mapping required).
+5. Add all env vars, attach a persistent volume at `/data`.
 
 ### H. Fly.io
 
 ```bash
-fly launch --no-deploy            # generates fly.toml (remove [http_service]/[[services]] — no ports)
-fly postgres create               # managed Postgres
-# Redis: Upstash (fly ext redis create) ; Mongo: Atlas
+fly launch --no-deploy
+# Remove [http_service] and [[services]] from fly.toml — no HTTP port needed
+fly postgres create
+fly ext redis create   # Upstash Redis
+# Create free Atlas M0 cluster for Mongo
 fly secrets set TELEGRAM_API_ID=… TELEGRAM_API_HASH=… ADMIN_BOT_TOKEN=… ADMIN_IDS=… SECRET_KEY=… \
                MONGO_URI=… REDIS_URL=… POSTGRES_HOST=… POSTGRES_PASSWORD=…
-fly volumes create nekodata --size 3      # mount at /data in fly.toml
+fly volumes create nekodata --size 3   # mount at /data in fly.toml
 fly deploy
 ```
 
 ### Managed / external data services (free tiers)
 
-Mix and match — point the `.env` connection strings at any of these:
+Mix and match any combination — point `.env` at these:
 
-| Service | Free option |
-|---|---|
-| **PostgreSQL** | [Neon](https://neon.tech), [Supabase](https://supabase.com), Railway, Render |
-| **MongoDB** | [MongoDB Atlas](https://www.mongodb.com/atlas) (M0 free) |
-| **Redis** | [Upstash](https://upstash.com), Railway, Render Key Value |
+| Service | Free option | Notes |
+|---|---|---|
+| **PostgreSQL** | [Neon](https://neon.tech), [Supabase](https://supabase.com), Railway, Render | All offer durable Postgres with connection pooling |
+| **MongoDB** | [MongoDB Atlas](https://www.mongodb.com/atlas) (M0 free tier) | 512 MB, enough for metadata + settings |
+| **Redis** | [Upstash](https://upstash.com), Railway, Render Key Value | Serverless Redis with free tier; set `REDIS_URL` |
 
 ---
 
@@ -613,16 +667,31 @@ each**, set its id in `config.yaml`, and enable it. Full walkthrough in
 
 Send `/start` to your admin bot → **Admin Panel**:
 
-- **Queue** — live download dashboard (progress, speed, ETA via message edits)
-- **Approvals** — Publish / Reprocess / Cancel finished content
+- **Queue** — live download dashboard with per-episode progress, speed, ETA (HTML blockquote rendering, auto-refreshed)
+- **Approvals** — Publish / Reprocess / Cancel finished content with full file summaries
 - **Bots** — paste a BotFather token to spawn a distribution bot; bind a title; see titles awaiting a bot
 - **Storage** — assisted pack indexing (`anime_ref | season | resolution | language | start_id | end_id`)
-- **Settings** — live feature toggles (persisted to Mongo)
-- **Analytics** — users, downloads, queue, most requested
-- **Staff** — promote/demote, ban/unban
+- **Settings** — live feature toggles (persisted to Mongo, apply instantly without restart)
+- **Analytics** — users, downloads, queue size, most requested titles
+- **Staff** — promote/demote, ban/unban with role-based permissions
 - **Broadcast** — message all users
 
-Public users get the request flow: **Request Anime → search → pick → season → scope → submit**.
+Every UI element uses Unicode small-caps typography, bold serif headings, and HTML blockquote wrapping. Async operations show a dot-escalation loading animation. Errors and success states are wrapped in expandable blockquotes with clear emoji indicators.
+
+**User experience:**
+
+- **Request flow** — Request Anime → search → pick → season → scope → submit → track in queue
+- **Notifications** — users receive Telegram DMs when their download completes, processing finishes, content is published, or when a failure occurs (with error details)
+- **Admin alerts** — if a distribution bot fails to start or a channel peer can't be resolved, the owner gets a Telegram DM
+
+**Distribution bot UX:**
+
+- Poster card with spoiler image on `/start`
+- Animated sticker intro (deleted after 1.5s)
+- Season → Resolution → Language → Delivery
+- Temporary links with configurable expiry
+- Auto-delete after delivery (optional)
+- Force-subscribe gate (optional)
 
 ---
 
@@ -644,14 +713,20 @@ pytest on every push and PR.
 
 | Symptom | Likely cause |
 |---|---|
-| Bot doesn't respond to `/start` | wrong `ADMIN_BOT_TOKEN`, or DBs unreachable (check logs) |
-| No **Admin Panel** button | your id isn't in `ADMIN_IDS` |
-| Log/main/index channel silent | bot isn't a channel **admin**, or wrong `channel_id` (`-100…`) |
-| Indexing / delivery fails | admin bot not an admin of the storage channel, or bad message range |
-| Metadata cards missing | `providers/metadata/scraper.py` still has `implemented = False` (expected) |
+| Bot doesn't respond to `/start` | Wrong `ADMIN_BOT_TOKEN`, or DBs unreachable (check logs) |
+| No **Admin Panel** button | Your ID isn't in `ADMIN_IDS` |
+| Log/main/index channel silent | Bot isn't a channel **admin**, or wrong `channel_id` (`-100…`). The bot must also have received at least one message in a private channel to cache its `access_hash` |
+| Log channel pins missing after channel change | Old pins are automatically cleaned up when `channel_id` changes, but the bot needs to be admin of the old channel to delete them |
+| Indexing / delivery fails | Bot not an admin of the storage channel, or bad message range |
+| Metadata cards missing | `providers/metadata/scraper.py` still has `implemented = False` (expected for a fresh clone) |
+| Distribution bot won't start | Token is invalid (regenerate with BotFather), or the bot is already running elsewhere |
 | Access link does nothing | `shortlink.linkvertise_user_id` not set, or `access.enabled = false` |
-| Build fails on a PaaS | install `ffmpeg`; ensure Rust toolchain for some wheels (Termux) |
-| `Microsoft Visual C++ 14.0 … is required` (Windows) | only the optional `tgcrypto` speedup needs a compiler — it's **not** required. A plain `pip install -e .` (and `run.bat`) skips it; the bot runs on pure-Python crypto. To add the speedup, install [MS C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) then `pip install -e ".[speedups]"`. |
+| Users not getting notifications | The admin bot must have **started a conversation** with the user (user must send `/start` to the admin bot at least once) |
+| Rate limit message shows raw text | The `middleware.py` now uses HTML + `bq()` — if you see raw `<blockquote>` in the message, your Pyrogram version is too old (upgrade to 2.x) |
+| Loading animation not showing | The message edit for loading happens asynchronously — if the follow-up operation completes instantly, the edit may be overwritten before it's visible. Normal behavior for fast operations |
+| Sticker not deleted on `/start` | The `sticker_delete_delay` in `config.yaml` is too short, or the bot lacks delete permission in the DM |
+| Build fails on a PaaS | Install `ffmpeg`; ensure Rust toolchain for some wheels (Termux) |
+| `Microsoft Visual C++ 14.0 … is required` (Windows) | Only the optional `tgcrypto` speedup needs a compiler — it's **not** required. A plain `pip install -e .` skips it; the bot runs on pure-Python crypto |
 
 ---
 
