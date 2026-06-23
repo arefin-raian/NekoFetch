@@ -17,6 +17,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 import time
 import urllib.parse
 from pathlib import Path
@@ -252,20 +253,11 @@ class KickAssAnimeSource(AnimeSource):
         slug = source_ref.strip("/")
 
         languages = await self._fetch_languages(slug)
-        lang_order = sorted(
-            languages,
-            key=lambda x: (
-                x != self.preferred_lang,
-                x != self.second_lang,
-            ),
-        )
 
-        seen: set[str] = set()
+        seen: set[tuple[int, str]] = set()
         episodes: list[Episode] = []
 
-        for lang in lang_order:
-            if episodes:
-                break
+        for lang in languages:
             page = 1
             while True:
                 resp = await self.http.get(f"{self.api_url}/{slug}/episodes?page={page}&lang={lang}")
@@ -281,7 +273,7 @@ class KickAssAnimeSource(AnimeSource):
                     ep_title = ep.get("title")
                     num = int(float(ep_str)) if ep_str.replace(".", "", 1).isdigit() else 0
 
-                    ep_key = f"{num}"
+                    ep_key = (num, lang)
                     if ep_key not in seen:
                         seen.add(ep_key)
                         display = f"Ep. {ep_str}"
@@ -289,7 +281,7 @@ class KickAssAnimeSource(AnimeSource):
                             display += f" - {ep_title}"
                         episodes.append(
                             Episode(
-                                source_ref=f"{slug}/ep-{ep_str}-{ep_slug}",
+                                source_ref=f"{slug}/{lang}/ep-{ep_str}-{ep_slug}",
                                 season=1,
                                 number=num,
                                 title=display,
@@ -317,13 +309,27 @@ class KickAssAnimeSource(AnimeSource):
         if not ep_path:
             return []
 
+        lang = self.preferred_lang
+        parts = ep_path.split("/")
+        if len(parts) >= 2 and parts[0] in ("ja-JP", "en-US"):
+            lang = parts[0]
+            ep_path = "/".join(parts[1:])
+
         ep_part = ep_path.replace("ep-", "episode/ep-")
         url = f"{self.api_url}/{slug}/{ep_part}"
 
-        resp = await self.http.get(url)
-        resp.raise_for_status()
-        data = resp.json()
-        servers = data.get("servers", [])
+        resp = await self._retry_get(url, {"Referer": f"{self.base_url}/"}, retries=3)
+        if resp.status_code != 200:
+            log.warning("get_variants.api_failed", url=url, status=resp.status_code)
+            servers = await self._scrape_servers_from_page(f"{self.base_url}/{slug}/{ep_path}")
+            if not servers:
+                return []
+        else:
+            data = resp.json()
+            servers = data.get("servers", [])
+
+        audio_type = AudioType.SUBBED if lang == self.preferred_lang else AudioType.DUBBED
+        lang_label = "japanese" if lang == "ja-JP" else "english"
 
         variants: list[VideoVariant] = []
 
@@ -339,9 +345,11 @@ class KickAssAnimeSource(AnimeSource):
             if not hls_url:
                 continue
 
-            qualities = await self._probe_qualities(hls_url)
             subs = video.get("subtitles", [])
             player_url = video.get("player_url", src)
+            origin_host = urllib.parse.urlparse(player_url).hostname
+            probe_referer = f"https://{origin_host}/" if origin_host else None
+            qualities = await self._probe_qualities(hls_url, referer=probe_referer)
 
             for q in qualities:
                 variants.append(
@@ -354,7 +362,8 @@ class KickAssAnimeSource(AnimeSource):
                             "subtitles": [(s.get("name", ""), _fix_url(s.get("src", ""))) for s in subs],
                         }),
                         resolution=q,
-                        audio=AudioType.SUBBED,
+                        audio=audio_type,
+                        languages=[lang_label],
                         subtitles=[s.get("language", "") for s in subs],
                     )
                 )
@@ -386,6 +395,69 @@ class KickAssAnimeSource(AnimeSource):
         if result:
             result["player_url"] = final_url
         return result
+
+    @staticmethod
+    def _js_obj_to_json(raw: str) -> str:
+        """Convert a JS-style object literal to strict JSON by quoting bare keys and single-quoted strings."""
+        s = re.sub(r"(?<=[{,])\s*([a-zA-Z_]\w*)\s*(?=:)", r'"\1"', raw)
+        s = re.sub(r"'([^']*?)'", r'"\1"', s)
+        return s
+
+    async def _scrape_servers_from_page(self, page_url: str) -> list[dict]:
+        """Fallback: extract server list from episode page HTML when the JSON API is blocked."""
+        try:
+            resp = await self._retry_get(page_url, {"Referer": f"{self.base_url}/"}, retries=2)
+            if resp.status_code != 200:
+                return []
+            html = resp.text
+        except httpx.HTTPError:
+            return []
+
+        servers: list[dict] = []
+
+        # Pattern 1: embedded JSON in a script tag — servers array or object
+        for pattern in (
+            r'<script[^>]*>[^<]*?servers\s*=\s*(\[[\s\S]*?\])\s*;',
+            r'<script[^>]*>[^<]*?window\.__DATA__\s*=\s*(\{[\s\S]*?\})\s*;',
+            r'servers:\s*(\[[\s\S]*?\])',
+        ):
+            m = re.search(pattern, html)
+            if m:
+                raw = m.group(1).rstrip(",")
+                for attempt in (raw, self._js_obj_to_json(raw)):
+                    try:
+                        data = json.loads(attempt)
+                        if isinstance(data, list):
+                            if data and "src" in data[0]:
+                                return data
+                        elif isinstance(data, dict):
+                            sv = data.get("servers") or data.get("serverList") or data.get("sources") or []
+                            if sv and "src" in sv[0]:
+                                return sv
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+
+        # Pattern 2: data-server / data-src attributes on page elements
+        for sm in re.finditer(
+            r'data-server=["\']([^"\']+)["\'][^>]*data-src=["\']([^"\']+)["\']',
+            html,
+        ):
+            servers.append({"name": sm.group(1), "src": sm.group(2)})
+        if servers:
+            return servers
+
+        # Pattern 3: krussdomi player links in the page
+        seen: set[str] = set()
+        for sm in re.finditer(r'href="(https://krussdomi\.com/cat-player/player[^"]+)"', html):
+            url = sm.group(1)
+            if url not in seen:
+                seen.add(url)
+                name = "VidStreaming"
+                servers.append({"name": name, "src": url})
+        if servers:
+            return servers
+
+        return []
 
     def _parse_new_player(self, clean_html: str) -> dict | None:
         m = re.search(r'manifest":\[0,"(?:https?:)?(//[^"]+)"', clean_html)
@@ -478,7 +550,7 @@ class KickAssAnimeSource(AnimeSource):
         except Exception:
             return None
 
-    async def _probe_qualities(self, url: str) -> list[str]:
+    async def _probe_qualities(self, url: str, referer: str | None = None) -> list[str]:
         if ".mpd" in url:
             return [self.preferred_quality]
 
@@ -486,7 +558,7 @@ class KickAssAnimeSource(AnimeSource):
             try:
                 resp = await self.http.get(
                     url,
-                    headers={"Referer": "https://kaa.lt/"},
+                    headers={"Referer": referer or "https://kaa.lt/"},
                 )
                 resp.raise_for_status()
                 lines = resp.text.splitlines()
@@ -526,34 +598,13 @@ class KickAssAnimeSource(AnimeSource):
 
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        if quality != self.preferred_quality and ".m3u8" in video_url:
-            try:
-                resp = await self.http.get(video_url)
-                resp.raise_for_status()
-                lines = resp.text.splitlines()
-                for i, line in enumerate(lines):
-                    if line.startswith("#EXT-X-STREAM-INF"):
-                        if f"RESOLUTION=x{quality.rstrip('p')}" in line or re.search(r"RESOLUTION=\d+x\d+", line):
-                            if i + 1 < len(lines):
-                                quality_url = _fix_url(lines[i + 1], video_url)
-                                if quality_url.startswith("http"):
-                                    video_url = quality_url
-                                    break
-            except httpx.HTTPError:
-                pass
-
-        ext = ".mp4"
-        if ".m3u8" in video_url:
-            ext = ".mkv"
-        elif ".mpd" in video_url:
-            ext = ".mp4"
-
+        ext = ".mkv" if ".m3u8" in video_url else ".mp4"
         dest = dest.with_suffix(ext)
 
         if ".m3u8" in video_url:
             player_url = info.get("player_url", "")
             subs = info.get("subtitles", [])
-            return await self._download_hls(video_url, dest, player_url=player_url, subtitles=subs, on_progress=on_progress)
+            return await self._download_hls(video_url, dest, player_url=player_url, subtitles=subs, quality=quality, on_progress=on_progress)
 
         ffmpeg_args = [
             "ffmpeg",
@@ -614,7 +665,7 @@ class KickAssAnimeSource(AnimeSource):
         referer = f"https://{origin_host}/"
 
         yt_cmd = [
-            "yt-dlp",
+            sys.executable, "-m", "yt_dlp",
             "--concurrent-fragments", str(concurrent),
             "--referer", referer,
             "--add-headers", f"Origin: https://{origin_host}",
@@ -622,6 +673,7 @@ class KickAssAnimeSource(AnimeSource):
             "--user-agent", user_agent,
             "--retries", "10",
             "--fragment-retries", "15",
+            "--fixup", "force",
             "--output", str(output),
             url,
         ]
@@ -655,6 +707,7 @@ class KickAssAnimeSource(AnimeSource):
         *,
         player_url: str = "",
         subtitles: list[tuple[str, str]] | None = None,
+        quality: str = "1080p",
         on_progress: ProgressCallback | None = None,
     ) -> dict:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -665,10 +718,7 @@ class KickAssAnimeSource(AnimeSource):
             "Origin": f"https://{origin_host}",
             "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
         }
-        master_headers = {**seg_headers, "Referer": "https://kaa.lt/"}
-
-        if not shutil.which("yt-dlp"):
-            raise RuntimeError("yt-dlp not found on PATH — pip install yt-dlp")
+        master_headers = {**seg_headers, "Referer": f"https://{origin_host}/"}
 
         # ── 1. Fetch master manifest (retry handles 521) ───────────────
         resp = await self._retry_get(manifest_url, master_headers)
@@ -696,17 +746,28 @@ class KickAssAnimeSource(AnimeSource):
             elif line.startswith("#EXT-X-STREAM-INF"):
                 if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
                     candidate = _fix_url(lines[i + 1], manifest_url)
-                    if video_url is None or re.search(r"RESOLUTION=\d+x1080?", line):
+                    if video_url is None:
                         video_url = candidate
+                    elif quality != "1080p":
+                        m = re.search(r"RESOLUTION=\d+x(\d+)", line)
+                        if m and m.group(1) == quality.rstrip("p"):
+                            video_url = candidate
+                    else:
+                        m = re.search(r"RESOLUTION=\d+x1080?", line)
+                        if m:
+                            video_url = candidate
 
         if not video_url:
             raise RuntimeError("No video playlist found in master manifest")
 
-        log.info(
-            "Found 1 video + %d audio tracks — %s",
-            len(audio_tracks),
-            ", ".join(f"{n} ({l})" for n, l, _ in audio_tracks),
-        )
+        if audio_tracks:
+            log.info(
+                "Found 1 video + %d audio tracks — %s",
+                len(audio_tracks),
+                ", ".join(f"{n} ({l})" for n, l, _ in audio_tracks),
+            )
+        else:
+            log.info("Found 1 video with embedded audio (no separate audio tracks)")
 
         # ── 3. Download ALL subtitle tracks ────────────────────────────
         sub_files: list[tuple[Path, str]] = []
@@ -759,21 +820,39 @@ class KickAssAnimeSource(AnimeSource):
 
         await asyncio.gather(*dl_tasks)
 
+        for f in [video_raw] + [af for af, _, _ in audio_raw_list] + [sf for sf, _ in sub_files]:
+            if not f.exists() or f.stat().st_size == 0:
+                raise RuntimeError(f"Downloaded file missing or empty: {f}")
+
+        # Probe each input with ffprobe/ffmpeg to check the format before muxing
+        for label, f in [("video", video_raw)] + [("audio", af) for af, _, _ in audio_raw_list] + [("sub", sf) for sf, _ in sub_files]:
+            p = await asyncio.create_subprocess_exec(
+                ffmpeg_bin, "-hide_banner", "-i", str(f),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, err = await p.communicate()
+            err_text = err.decode(errors="replace")
+            log.info("mux.input.probe", label=label, path=str(f), size=f.stat().st_size, probe=err_text[:500])
+
         # ── 5. ffmpeg: mux all tracks into single MKV ──────────────────
-        cmd = [ffmpeg_bin, "-y"]
+        cmd = [ffmpeg_bin, "-y", "-fflags", "+genpts"]
         cmd.extend(["-i", str(video_raw)])
         for af, _, _ in audio_raw_list:
             cmd.extend(["-i", str(af)])
         for sf, _ in sub_files:
             cmd.extend(["-i", str(sf)])
 
-        cmd.extend(["-c", "copy", "-map", "0:v"])
+        cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "copy", "-map", "0:v"])
 
-        for i, (_, _, lang) in enumerate(audio_raw_list):
-            cmd.extend([
-                "-map", f"{i + 1}:a",
-                f"-metadata:s:a:{i}", f"language={lang}",
-            ])
+        if audio_raw_list:
+            for i, (_, _, lang) in enumerate(audio_raw_list):
+                cmd.extend([
+                    "-map", f"{i + 1}:a",
+                    f"-metadata:s:a:{i}", f"language={lang}",
+                ])
+        else:
+            cmd.extend(["-map", "0:a"])
 
         for i, (_, lang) in enumerate(sub_files):
             sidx = len(audio_raw_list) + i
@@ -793,9 +872,10 @@ class KickAssAnimeSource(AnimeSource):
         )
         _, stderr = await proc.communicate()
         if proc.returncode != 0:
+            stderr_text = stderr.decode(errors='replace')
+            log.error("ffmpeg.mux.failed", exit_code=proc.returncode, stderr=stderr_text)
             raise RuntimeError(
-                f"ffmpeg mux failed (exit {proc.returncode}): "
-                f"{stderr.decode(errors='replace')[-300:]}"
+                f"ffmpeg mux failed (exit {proc.returncode}): {stderr_text}"
             )
 
         # Cleanup temp files

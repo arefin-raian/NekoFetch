@@ -84,78 +84,78 @@ class DownloadWorker:
                 episodes = [e for e in episodes if e.number in set(req.episodes)]
             job.started_at = _now()
 
-        targets = self._targets(req)  # (resolution, audio) combos to acquire
+        audios = self._target_audios(req)
 
-        # For each episode, acquire every requested quality x language combo. Combos that
-        # the source doesn't offer are skipped (not an error).
         for ep in episodes:
             variants = await source.get_variants(ep.source_ref)
-            for resolution, audio in targets:
-                variant = _select_variant(
-                    variants, resolution, audio, self._c.config.acquisition.require_english_subs
-                )
-                if variant is None:
-                    continue
-                dest = (
-                    self._c.env.storage_path
-                    / "work"
-                    / f"{req.source_ref}"
-                    / f"S{ep.season:02d}E{ep.number:03d}_{variant.resolution}_{variant.audio.value}"
-                    f".{variant.container or 'mkv'}"
-                )
+            avail_resolutions = sorted(
+                set(v.resolution for v in variants),
+                key=lambda r: int(r.rstrip("p")), reverse=True,
+            )
+            if req.resolution:
+                avail_resolutions = [r for r in avail_resolutions if r == req.resolution]
+            for resolution in avail_resolutions:
+                for audio in audios:
+                    variant = _select_variant(
+                        variants, resolution, audio, self._c.config.acquisition.require_english_subs
+                    )
+                    if variant is None:
+                        continue
 
-                start = time.monotonic()
-                last_emit = 0.0
+                    dest = (
+                        self._c.env.storage_path
+                        / "work"
+                        / f"{req.source_ref}"
+                        / f"S{ep.season:02d}E{ep.number:03d}_{variant.resolution}_{variant.audio.value}"
+                        f".{variant.container or 'mkv'}"
+                    )
 
-                async def on_progress(done: int, total: int, _ep=ep, _start=start,
-                                      _v=variant) -> None:
-                    nonlocal last_emit
-                    now = time.monotonic()
-                    if now - last_emit < cfg.progress_update_interval_seconds:
-                        return
-                    last_emit = now
-                    elapsed = max(now - _start, 1e-6)
-                    speed = done / elapsed
-                    pct = (done / total * 100) if total else 0.0
-                    eta = int((total - done) / speed) if speed > 0 else None
-                    if self._c.progress:
-                        await self._c.progress.set(
-                            ProgressSnapshot(
-                                job_id=job_id,
-                                status=JobStatus.RUNNING.value,
-                                progress=pct,
-                                speed_bps=speed,
-                                downloaded_bytes=done,
-                                total_bytes=total,
-                                current_episode=_ep.number,
-                                eta_seconds=eta,
-                                label=f"S{_ep.season:02d}E{_ep.number:03d} {_v.resolution} {_v.audio.value}",
+                    start = time.monotonic()
+                    last_emit = 0.0
+
+                    async def on_progress(done: int, total: int, _ep=ep, _start=start,
+                                          _v=variant) -> None:
+                        nonlocal last_emit
+                        now = time.monotonic()
+                        if now - last_emit < cfg.progress_update_interval_seconds:
+                            return
+                        last_emit = now
+                        elapsed = max(now - _start, 1e-6)
+                        speed = done / elapsed
+                        pct = (done / total * 100) if total else 0.0
+                        eta = int((total - done) / speed) if speed > 0 else None
+                        if self._c.progress:
+                            await self._c.progress.set(
+                                ProgressSnapshot(
+                                    job_id=job_id,
+                                    status=JobStatus.RUNNING.value,
+                                    progress=pct,
+                                    speed_bps=speed,
+                                    downloaded_bytes=done,
+                                    total_bytes=total,
+                                    current_episode=_ep.number,
+                                    eta_seconds=eta,
+                                    label=f"S{_ep.season:02d}E{_ep.number:03d} {_v.resolution} {_v.audio.value}",
+                                )
                             )
-                        )
 
-                result = await self._download_with_retry(
-                    source, variant, dest, on_progress,
-                    cfg.retry_attempts, cfg.retry_backoff_seconds,
-                )
-                await self._record_file(job_id, req, ep, variant, dest, result)
+                    result = await self._download_with_retry(
+                        source, variant, dest, on_progress,
+                        cfg.retry_attempts, cfg.retry_backoff_seconds,
+                    )
+                    await self._record_file(job_id, req, ep, variant, dest, result)
 
         await self._complete(job_id)
 
-    def _targets(self, req) -> list[tuple[str | None, AudioType]]:
-        """Resolve the (resolution, audio) combos to acquire for a request.
+    def _target_audios(self, req) -> list[AudioType]:
+        """Resolve the audio types (subbed/dubbed) to acquire for a request.
 
-        A fully-specified request yields one combo; an unspecified one fans out into the
-        configured acquisition matrix (all resolutions x english/japanese).
+        When unspecified, fans out into the configured languages (english → DUBBED, japanese → SUBBED).
         """
         acq = self._c.config.acquisition
-        if req.resolution and req.audio:
-            return [(req.resolution, req.audio)]
-        resolutions = [req.resolution] if req.resolution else list(acq.resolutions)
         if req.audio:
-            audios = [req.audio]
-        else:
-            audios = [a for a in (_audio_for_language(lang) for lang in acq.languages) if a]
-        return [(r, a) for r in resolutions for a in audios]
+            return [req.audio]
+        return [a for a in (_audio_for_language(lang) for lang in acq.languages) if a]
 
     async def _download_with_retry(
         self, source, variant, dest, on_progress, attempts, backoff
