@@ -49,7 +49,6 @@ class ProcessingPipeline:
                     job.status = JobStatus.FAILED
                     raise ProcessingError(f"{stage.stage.value}: {exc}") from exc
 
-            # Decide publish state.
             if self._c.config.processing.require_approval_before_publish:
                 req.status = RequestStatus.READY
             else:

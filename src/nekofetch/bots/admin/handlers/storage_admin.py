@@ -1,17 +1,7 @@
-"""Admin storage-channel panel: assisted pack indexing + pack listing.
-
-Assisted indexing records content you've already posted to the database channel as a
-deliverable pack. The admin supplies a compact line:
-
-    anime_ref | season | resolution | language | start_message_id | end_message_id
-
-where ``language`` is one of sub / dub / dual. NekoFetch reads the message range, keeps
-the media as the ordered file list, and stores the pack.
-"""
-
 from __future__ import annotations
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
@@ -24,6 +14,8 @@ from nekofetch.infrastructure.database.postgres.models import StoragePack
 from nekofetch.services.auth_service import AuthService
 from nekofetch.services.storage_channel_service import StorageChannelService
 from nekofetch.ui.components import cb, keyboard
+from nekofetch.ui.progress import loading_animation
+from nekofetch.ui.typography import bq, bqx
 
 STATE_INDEX = "storage:await_index"
 
@@ -50,15 +42,18 @@ def register(client: Client, container: Container) -> None:
             return
         await q.answer()
         enabled = container.config.storage_channel.enabled
+        status_text = "ᴇɴᴀʙʟᴇᴅ" if enabled else "ᴅɪsᴀʙʟᴇᴅ"
+        ch_id = container.config.storage_channel.channel_id or "ɴᴏᴛ sᴇᴛ"
         await q.message.edit_text(
-            "**▸ Storage Channel**\n\n"
-            f"Status: {'enabled' if enabled else 'disabled'}\n"
-            f"Channel: `{container.config.storage_channel.channel_id or 'not set'}`",
+            f"{bq('<b>▸ sᴛᴏʀᴀɢᴇ ᴄʜᴀɴɴᴇʟ</b>')}\n\n"
+            f"{bq(f'sᴛᴀᴛᴜs: <code>{status_text}</code>')}\n"
+            f"{bq(f'ᴄʜᴀɴɴᴇʟ: <code>{ch_id}</code>')}",
             reply_markup=keyboard(
-                [("➜ Index Pack", cb("storage", "index"))],
-                [("▸ List Packs", cb("storage", "list"))],
-                [("◂ Back", cb("admin", "home"))],
+                [("➜ ɪɴᴅᴇx ᴘᴀᴄᴋ", cb("storage", "index"))],
+                [("▸ ʟɪsᴛ ᴘᴀᴄᴋs", cb("storage", "list"))],
+                [("← ʙᴀᴄᴋ", cb("admin", "home"))],
             ),
+            parse_mode=ParseMode.HTML,
         )
 
     @client.on_callback_query(filters.regex(r"^storage\|index"))
@@ -69,13 +64,14 @@ def register(client: Client, container: Container) -> None:
         await fsm.set(q.from_user.id, STATE_INDEX)
         await q.answer()
         await q.message.edit_text(
-            "**Index a Pack**\n\n"
-            "Send one line:\n"
-            "`anime_ref | season | resolution | language | start_id | end_id`\n\n"
-            "Example:\n"
-            "`naruto-shippuden | 1 | 1080p | dual | 1201 | 1705`\n\n"
-            "language = sub / dub / dual. start_id..end_id is the message range in the "
-            "database channel (header through end sticker)."
+            bq("<b>ɪɴᴅᴇx ᴀ ᴘᴀᴄᴋ</b>\n\n"
+               "sᴇɴᴅ ᴏɴᴇ ʟɪɴᴇ:\n"
+               "<code>ᴀɴɪᴍᴇ_ʀᴇꜰ | sᴇᴀsᴏɴ | ʀᴇsᴏʟᴜᴛɪᴏɴ | ʟᴀɴɢᴜᴀɢᴇ | sᴛᴀʀᴛ_ɪᴅ | ᴇɴᴅ_ɪᴅ</code>\n\n"
+               "ᴇxᴀᴍᴘʟᴇ:\n"
+               "<code>ɴᴀʀᴜᴛᴏ-sʜɪᴘᴘᴜᴅᴇɴ | 1 | 1080ᴘ | ᴅᴜᴀʟ | 1201 | 1705</code>\n\n"
+               "ʟᴀɴɢᴜᴀɢᴇ = sᴜʙ / ᴅᴜʙ / ᴅᴜᴀʟ. sᴛᴀʀᴛ_ɪᴅ..ᴇɴᴅ_ɪᴅ ɪs ᴛʜᴇ ᴍᴇssᴀɢᴇ ʀᴀɴɢᴇ "
+               "ɪɴ ᴛʜᴇ ᴅᴀᴛᴀʙᴀsᴇ ᴄʜᴀɴɴᴇʟ (ʜᴇᴀᴅᴇʀ ᴛʜʀᴏᴜɢʜ ᴇɴᴅ sᴛɪᴄᴋᴇʀ)."),
+            parse_mode=ParseMode.HTML,
         )
 
     @client.on_callback_query(filters.regex(r"^storage\|list"))
@@ -83,22 +79,28 @@ def register(client: Client, container: Container) -> None:
         if not _allowed(q):
             await q.answer(L("access_denied"), show_alert=True)
             return
+        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ ᴘᴀᴄᴋs")
         await q.answer()
         async with container.session() as session:
             packs = (
                 await session.execute(select(StoragePack).limit(30))
             ).scalars().all()
         if not packs:
-            await q.message.edit_text("**▸ Storage Packs**\n\nNo packs indexed yet.")
+            await q.message.edit_text(
+                f"{bq('<b>▸ sᴛᴏʀᴀɢᴇ ᴘᴀᴄᴋs</b>')}\n\n{bq('ɴᴏ ᴘᴀᴄᴋs ɪɴᴅᴇxᴇᴅ ʏᴇᴛ.')}",
+                parse_mode=ParseMode.HTML,
+            )
             return
         lines = [
             f"{DIAMOND_FILLED} {p.anime_title} S{p.season} [{p.resolution}] "
-            f"[{p.audio.value if hasattr(p.audio, 'value') else p.audio}] — {p.file_count} files"
+            f"[{p.audio.value if hasattr(p.audio, 'value') else p.audio}] — {p.file_count} ꜰɪʟᴇs"
             for p in packs
         ]
-        await q.message.edit_text("**▸ Storage Packs**\n\n" + "\n".join(lines))
+        await q.message.edit_text(
+            f"{bq('<b>▸ sᴛᴏʀᴀɢᴇ ᴘᴀᴄᴋs</b>')}\n\n" + "\n".join(lines),
+            parse_mode=ParseMode.HTML,
+        )
 
-    # Group 2 so it coexists with request-flow (0) and bot-token (1) text handlers.
     @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=2)
     async def _index_input(_: Client, message: Message) -> None:
         if not message.from_user:
@@ -113,16 +115,25 @@ def register(client: Client, container: Container) -> None:
 
         parts = [p.strip() for p in message.text.split("|")]
         if len(parts) != 6:
-            await message.reply("Expected 6 fields separated by `|`. Try again from the panel.")
+            await message.reply(
+                bq("ᴇxᴘᴇᴄᴛᴇᴅ 6 ꜰɪᴇʟᴅs sᴇᴘᴀʀᴀᴛᴇᴅ ʏ <code>|</code>. ᴛʀʏ ᴀɢᴀɪɴ ꜰʀᴏᴍ ᴛʜᴇ ᴘᴀɴᴇʟ."),
+                parse_mode=ParseMode.HTML,
+            )
             return
         ref, season_s, resolution, lang_s, start_s, end_s = parts
         audio = _LANG.get(lang_s.lower())
         if audio is None or not (season_s.isdigit() and start_s.isdigit() and end_s.isdigit()):
-            await message.reply("Couldn't parse fields. Check season/ids are numbers and language is sub/dub/dual.")
+            await message.reply(
+                bq("ᴄᴏᴜʟᴅɴ'ᴛ ᴘᴀʀsᴇ ꜰɪᴇʟᴅs. ᴄʜᴇᴄᴋ sᴇᴀsᴏɴ/ɪᴅs ᴀʀᴇ ɴᴜᴍʙᴇʀs ᴀɴᴅ ʟᴀɴɢᴜᴀɢᴇ ɪs sᴜʙ/ᴅᴜʙ/ᴅᴜᴀʟ."),
+                parse_mode=ParseMode.HTML,
+            )
             return
 
         storage = StorageChannelService(container)
-        status = await message.reply("Indexing pack…")
+        status = await message.reply(
+            "<code>ɪɴᴅᴇxɪɴɢ ᴘᴀᴄᴋ!</code>", parse_mode=ParseMode.HTML
+        )
+        await loading_animation(status, "ɪɴᴅᴇxɪɴɢ ᴘᴀᴄᴋ")
         try:
             pack = await storage.index_pack(
                 storage.key_from(ref, int(season_s), resolution, audio),
@@ -131,12 +142,19 @@ def register(client: Client, container: Container) -> None:
                 end_message_id=int(end_s),
             )
         except NekoFetchError as exc:
-            await status.edit_text(f"✕ {exc.detail or 'Indexing failed (is the storage channel enabled?)'}")
+            await status.edit_text(
+                bq(f"✕ {exc.detail or 'ɪɴᴅᴇxɪɴɢ ꜰᴀɪʟᴇᴅ (ɪs ᴛʜᴇ sᴛᴏʀᴀɢᴇ ᴄʜᴀɴɴᴇʟ ᴇɴᴀʙʟᴅ?)'}"),
+                parse_mode=ParseMode.HTML,
+            )
             return
-        await status.edit_text(
-            f"{DIAMOND_FILLED} **Pack indexed**\n\n"
+        detail = (
             f"{pack.anime_title} S{pack.season} [{pack.resolution}] [{audio.value}]\n"
-            f"{pack.file_count} files (messages {pack.start_message_id}–{pack.end_message_id})"
+            f"{pack.file_count} ꜰɪʟᴇs (ᴍᴇssᴀɢᴇs {pack.start_message_id}–{pack.end_message_id})"
+        )
+        await status.edit_text(
+            f"{bq(f'{DIAMOND_FILLED} <b>ᴘᴀᴄᴋ ɪɴᴅᴇxᴇᴅ</b>')}\n\n"
+            f"{bq(detail)}",
+            parse_mode=ParseMode.HTML,
         )
         from nekofetch.services.log_channel_service import LogChannelService
 

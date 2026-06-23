@@ -1,13 +1,7 @@
-"""Distribution-bot generation (admin).
-
-    Admin Panel -> Bots -> Add Bot -> paste BotFather token -> registered & live
-
-The token is validated, encrypted, stored, and the bot is brought online immediately.
-"""
-
 from __future__ import annotations
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import CallbackQuery, Message
 
 from nekofetch.bots.fsm import FSM
@@ -17,6 +11,8 @@ from nekofetch.core.exceptions import NekoFetchError
 from nekofetch.domain.enums import Permission
 from nekofetch.services.auth_service import AuthService
 from nekofetch.ui.components import cb, keyboard
+from nekofetch.ui.progress import loading_animation
+from nekofetch.ui.typography import bq, bqx
 
 STATE_TOKEN = "bot:await_token"
 STATE_BIND = "bot:await_bind"
@@ -38,6 +34,7 @@ def register(client: Client, container: Container) -> None:
             return
         from nekofetch.services.bot_management_service import BotManagementService
 
+        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ ʙᴏᴛs")
         await q.answer()
         bots = await BotManagementService(container).list_bots()
         rows = []
@@ -47,20 +44,21 @@ def register(client: Client, container: Container) -> None:
                 handle = f" (@{b.username})" if b.username else ""
                 glyph = DIAMOND_FILLED if b.enabled else DIAMOND_HOLLOW
                 lines.append(f"{glyph} {b.name}{handle}")
-                rows.append([(f"Bind title — {b.name[:18]}", cb("botmgr", "bind", b.id))])
+                rows.append([(f"ʙɪɴᴅ ᴛɪᴛʟᴇ — {b.name[:18]}", cb("botmgr", "bind", b.id))])
             body = "\n".join(lines)
         else:
-            body = "No distribution bots yet."
-        # Titles with content but no bot yet (provide a token + bind to launch them).
+            body = "ɴᴏ ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛs ʏᴇᴛ."
         pending = await BotManagementService(container).pending_bot_animes()
         if pending:
-            body += "\n\n**Awaiting a bot:**\n" + "\n".join(
-                f"{DIAMOND_HOLLOW} {title}  (`{doc}`)" for doc, title in pending[:15]
+            body += "\n\n<b>ᴀᴡᴀɪᴛɪɴɢ ᴀ ʙᴏᴛ:</b>\n" + "\n".join(
+                f"{DIAMOND_HOLLOW} {title}  (<code>{doc}</code>)" for doc, title in pending[:15]
             )
-        rows.append([("➜ Add Bot", cb("botmgr", "add"))])
-        rows.append([("◂ Back", cb("admin", "home"))])
+        rows.append([("➜ ᴀᴅᴅ ʙᴏᴛ", cb("botmgr", "add"))])
+        rows.append([("← ʙᴀᴄᴋ", cb("admin", "home"))])
         await q.message.edit_text(
-            f"**▸ Distribution Bots**\n\n{body}", reply_markup=keyboard(*rows)
+            f"{bq('<b>▸ ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛs</b>')}\n\n{bq(body)}",
+            reply_markup=keyboard(*rows),
+            parse_mode=ParseMode.HTML,
         )
 
     @client.on_callback_query(filters.regex(r"^botmgr\|bind"))
@@ -72,8 +70,10 @@ def register(client: Client, container: Container) -> None:
         await fsm.set(q.from_user.id, STATE_BIND, bot_id=bot_id)
         await q.answer()
         await q.message.edit_text(
-            "**Bind Title**\n\nSend the anime reference (slug/id) to bind this bot to, "
-            "or send `-` to unbind. A bound bot opens directly on that title."
+            bq("<b>ʙɪɴᴅ ᴛɪᴛʟᴇ</b>\n\n"
+               "sᴇɴᴅ ᴛʜᴇ ᴀɴɪᴍᴇ ʀᴇꜰᴇʀᴇɴᴄᴇ (sʟᴜɢ/ɪᴅ) ᴛᴏ ʙɪɴᴅ ᴛʜɪs ʙᴏᴛ ᴛᴏ, "
+               "ᴏʀ sᴇɴᴅ <code>-</code> ᴛᴏ ᴜɴʙɪɴᴅ. ᴀ ʙᴏᴜɴᴅ ʙᴏᴛ ᴏᴘᴇɴs ᴅɪʀᴇᴄᴛʟʏ ᴏɴ ᴛʜᴀᴛ ᴛɪᴛʟᴇ."),
+            parse_mode=ParseMode.HTML,
         )
 
     @client.on_callback_query(filters.regex(r"^botmgr\|add"))
@@ -84,13 +84,13 @@ def register(client: Client, container: Container) -> None:
         await fsm.set(q.from_user.id, STATE_TOKEN)
         await q.answer()
         await q.message.edit_text(
-            "**Add Distribution Bot**\n\n"
-            "1. Create a bot with @BotFather.\n"
-            "2. Paste its token here.\n\n"
-            "The token is encrypted at rest and the bot goes live immediately."
+            bq("<b>ᴀᴅᴅ ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛ</b>\n\n"
+               "1. ᴄʀᴇᴀᴛᴇ ᴀ ʙᴏᴛ ᴡɪᴛʜ @ʙᴏᴛꜰᴀᴛʜᴇʀ.\n"
+               "2. ᴘᴀsᴛᴇ ɪᴛs ᴛᴏᴋᴇɴ ʜᴇʀᴇ.\n\n"
+               "ᴛʜᴇ ᴛᴏᴋᴇɴ ɪs ᴇɴᴄʀʏᴘᴛᴇᴅ ᴀᴛ ʀᴇsᴛ ᴀɴᴅ ᴛʜᴇ ʙᴏᴛ ɢᴏᴇs ʟɪᴠᴇ ɪᴍᴍᴇᴅɪᴀᴛᴇʟʏ."),
+            parse_mode=ParseMode.HTML,
         )
 
-    # Separate group so this coexists with the request-flow text handler.
     @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=1)
     async def _token(_: Client, message: Message) -> None:
         if not message.from_user:
@@ -110,7 +110,8 @@ def register(client: Client, container: Container) -> None:
             anime_doc_id = None if ref == "-" else ref
             await BotManagementService(container).bind_title(int(data["bot_id"]), anime_doc_id)
             await message.reply(
-                f"{DIAMOND_FILLED} Bot {'unbound' if anime_doc_id is None else f'bound to `{anime_doc_id}`'}."
+                bq(f"{DIAMOND_FILLED} ʙᴏᴛ {'ᴜɴʙᴏᴜɴᴅ' if anime_doc_id is None else f'ʙᴏᴜɴᴅ ᴛᴏ <code>{anime_doc_id}</code>'}"),
+                parse_mode=ParseMode.HTML,
             )
             return
 
@@ -118,19 +119,28 @@ def register(client: Client, container: Container) -> None:
         await fsm.clear(message.from_user.id)
         from nekofetch.services.bot_management_service import BotManagementService
 
-        status = await message.reply("Validating token…")
+        status = await message.reply(
+            "<code>ᴠᴀʟɪᴅᴀᴛɪɴɢ ᴛᴏᴋᴇɴ!</code>", parse_mode=ParseMode.HTML
+        )
+        await loading_animation(status, "ᴠᴀʟɪᴅᴀᴛɪɴɢ ᴛᴏᴋᴇɴ")
         try:
             info = await BotManagementService(container).register(token)
         except NekoFetchError as exc:
-            await status.edit_text(f"{DIAMOND_HOLLOW} {exc.detail or 'Registration failed.'}")
+            await status.edit_text(
+                bq(f"{DIAMOND_HOLLOW} {exc.detail or 'ʀᴇɢɪsᴛʀᴀᴛɪᴏɴ ꜰᴀɪʟᴇᴅ.'}"),
+                parse_mode=ParseMode.HTML,
+            )
             return
+        if info.username:
+            detail = f"<b>ɴᴀᴍᴇ:</b> <code>{info.name}</code>\n<b>ᴜsᴇʀɴᴀᴍᴇ:</b> @{info.username}"
+        else:
+            detail = f"<b>ɴᴀᴍᴇ:</b> <code>{info.name}</code>"
         await status.edit_text(
-            f"{DIAMOND_FILLED} **Bot registered & live**\n\n"
-            f"Name: {info.name}\n"
-            f"Username: @{info.username}" if info.username else f"Name: {info.name}"
+            f"{bq(f'{DIAMOND_FILLED} <b>ʙᴏᴛ ʀᴇɢɪsᴛᴇʀᴇᴅ & ʟɪᴠᴇ</b>')}\n\n"
+            f"{bq(detail)}",
+            parse_mode=ParseMode.HTML,
         )
-        # Avoid the token lingering in chat history.
         try:
             await message.delete()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

@@ -202,15 +202,36 @@ class DownloadWorker:
             req = await RequestRepository(session).get(job.request_id)
             if req:
                 req.status = RequestStatus.PROCESSING
+                user_id = req.user_id
+                title = req.anime_title
+                code = req.code
+                needs_approval = self._c.config.processing.require_approval_before_publish
+            else:
+                user_id = None
+                title = ""
+                code = ""
+                needs_approval = False
         log.info("download.job.complete", job_id=job_id)
+        if user_id:
+            from nekofetch.services.notification_service import NotificationService
+            await NotificationService(self._c).download_complete(user_id, title, code)
         from nekofetch.services.log_channel_service import LogChannelService
 
         await LogChannelService(self._c).event("download", "complete", job=job_id)
-        # Hand off to the processing pipeline.
         from nekofetch.services.processing.pipeline import ProcessingPipeline
 
-        await ProcessingPipeline(self._c).run_for_job(job_id)
-        await LogChannelService(self._c).event("processing", "complete", job=job_id)
+        try:
+            await ProcessingPipeline(self._c).run_for_job(job_id)
+            await LogChannelService(self._c).event("processing", "complete", job=job_id)
+            if user_id:
+                from nekofetch.services.notification_service import NotificationService
+                await NotificationService(self._c).processing_complete(user_id, title, code, needs_approval=needs_approval)
+        except Exception as exc:
+            log.error("download.processing.failed", job_id=job_id, error=str(exc))
+            await LogChannelService(self._c).event("error", "processing_failed", job=job_id, error=str(exc))
+            if user_id:
+                from nekofetch.services.notification_service import NotificationService
+                await NotificationService(self._c).processing_failed(user_id, title, code, str(exc))
 
     async def _handle_failure(self, job_id: int, exc: Exception) -> None:
         async with session_scope(self._c.pg_sessionmaker) as session:
@@ -219,7 +240,14 @@ class DownloadWorker:
                 return
             job.status = JobStatus.FAILED
             job.error = str(exc)
+            req = await RequestRepository(session).get(job.request_id)
+            user_id = req.user_id if req else None
+            title = req.anime_title if req else ""
+            code = req.code if req else ""
         log.error("download.job.failed", job_id=job_id, error=str(exc))
+        if user_id:
+            from nekofetch.services.notification_service import NotificationService
+            await NotificationService(self._c).download_failed(user_id, title, code, str(exc))
         from nekofetch.services.log_channel_service import LogChannelService
 
         await LogChannelService(self._c).event("error", "download_failed", job=job_id, error=str(exc))

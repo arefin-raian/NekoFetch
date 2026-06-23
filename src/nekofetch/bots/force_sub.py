@@ -1,17 +1,12 @@
-"""Force-subscribe gate.
-
-When ``security.force_subscribe`` is on, public users must be members of the configured
-channels before using a bot. Returns the channels a user still needs to join (with join
-buttons), or an empty list when satisfied / disabled.
-"""
-
 from __future__ import annotations
 
 from pyrogram import Client
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from nekofetch.core.container import Container
 from nekofetch.core.logging import get_logger
+from nekofetch.ui.progress import loading_animation
+from nekofetch.ui.typography import bq
 
 log = get_logger(__name__)
 
@@ -32,7 +27,7 @@ async def channels_to_join(
             status = getattr(member.status, "name", str(member.status)).upper()
             if status in _NOT_MEMBER:
                 missing.append(channel)
-        except Exception:  # noqa: BLE001 - USER_NOT_PARTICIPANT etc. => not a member
+        except Exception:
             missing.append(channel)
 
     out: list[tuple[str, str | None]] = []
@@ -41,16 +36,32 @@ async def channels_to_join(
             chat = await client.get_chat(channel)
             url = chat.invite_link or (f"https://t.me/{chat.username}" if chat.username else None)
             out.append((chat.title or str(channel), url))
-        except Exception:  # noqa: BLE001
+        except Exception:
             out.append((str(channel), None))
     return out
 
 
 def join_keyboard(channels: list[tuple[str, str | None]], retry_callback: str) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(f"➜ Join {title}", url=url)]
+        [InlineKeyboardButton(f"➜ ᴊᴏɪɴ {title}", url=url)]
         for title, url in channels
         if url
     ]
-    rows.append([InlineKeyboardButton("✓ I've Joined", callback_data=retry_callback)])
+    rows.append([InlineKeyboardButton("✓ ɪ'ᴠᴇ ᴊᴏɪɴᴇᴅ", callback_data=retry_callback)])
     return InlineKeyboardMarkup(rows)
+
+
+async def check_with_animation(
+    client: Client, container: Container, message: Message
+) -> list[tuple[str, str | None]]:
+    msg = await message.reply(
+        "<code>ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ!</code>", parse_mode="html"
+    )
+    await loading_animation(msg, "ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ")
+    pending = await channels_to_join(client, container, message.from_user.id)
+    if not pending:
+        await msg.edit_text(
+            bq("<b>🔒 sᴜʙsᴄʀɪᴘᴛɪᴏɴ sᴛᴀᴛᴜs: ᴘᴀssᴇᴅ</b>"),
+            parse_mode="html",
+        )
+    return pending

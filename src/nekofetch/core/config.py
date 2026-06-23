@@ -182,6 +182,7 @@ class SecurityConfig(BaseModel):
     anti_spam_cooldown_seconds: int = 2
     force_subscribe: bool = False
     force_subscribe_channels: list[int] = Field(default_factory=list)
+    owner_id: int = 0
 
 
 class StorageChannelConfig(BaseModel):
@@ -276,6 +277,15 @@ class SourcesConfig(BaseModel):
     default: str = "local"
 
 
+class UIConfig(BaseModel):
+    start_sticker_id: str = "CAACAgUAAyEFAASAgUwqAAJh_mckw2STkeY1WMOHJGY4Hs9_1-2fAAIPFAACYLShVon-N6AFLnIiHgQ"
+    start_image_url: str = "https://envs.sh/odE.png"
+    start_image_has_spoiler: bool = True
+    sticker_delete_delay: float = 1.5
+    loading_dot_delay: float = 0.32
+    loading_steps: int = 3
+
+
 class LocalizationConfig(BaseModel):
     default_language: str = "en"
     directory: str = "resources/language"
@@ -304,6 +314,7 @@ class AppConfig(BaseModel):
     shortlink: ShortlinkConfig = Field(default_factory=ShortlinkConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     localization: LocalizationConfig = Field(default_factory=LocalizationConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "AppConfig":

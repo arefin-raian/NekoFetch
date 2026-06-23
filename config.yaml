@@ -169,3 +169,11 @@ sources:
 localization:
   default_language: en
   directory: resources/language
+
+ui:
+  start_sticker_id: "CAACAgUAAyEFAASAgUwqAAJh_mckw2STkeY1WMOHJGY4Hs9_1-2fAAIPFAACYLShVon-N6AFLnIiHgQ"
+  start_image_url: "https://envs.sh/odE.png"
+  start_image_has_spoiler: true
+  sticker_delete_delay: 1.5
+  loading_dot_delay: 0.32
+  loading_steps: 3

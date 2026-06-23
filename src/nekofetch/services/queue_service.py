@@ -26,6 +26,9 @@ class QueueRow:
     progress: float
     speed_bps: float
     eta_seconds: int | None
+    current_episode: int | None = None
+    downloaded_bytes: int = 0
+    total_bytes: int = 0
 
 
 class QueueService:
@@ -69,6 +72,9 @@ class QueueService:
                         progress=(snap.progress if snap else job.progress),
                         speed_bps=(snap.speed_bps if snap else job.speed_bps),
                         eta_seconds=(snap.eta_seconds if snap else job.eta_seconds),
+                        current_episode=(snap.current_episode if snap else job.current_episode),
+                        downloaded_bytes=(snap.downloaded_bytes if snap else job.downloaded_bytes),
+                        total_bytes=(snap.total_bytes if snap else job.total_bytes),
                     )
                 )
             return rows

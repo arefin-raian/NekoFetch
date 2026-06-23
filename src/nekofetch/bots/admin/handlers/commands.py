@@ -1,28 +1,15 @@
-"""Bot command menu + the commands behind it (admin bot).
-
-Telegram shows a tappable command menu (the ``/`` list / "Menu" button) built from
-whatever we publish via ``set_bot_commands``. Every command listed here is backed by a
-real handler so nothing in the menu is dead:
-
-    /start  -> the main panel (handled in start.py)
-    /help   -> a role-aware cheatsheet of commands + button flows
-    /cancel -> clear any in-progress flow (search, add-staff, indexing, …)
-
-This module is registered **before** the stateful text routers so ``/help`` and
-``/cancel`` are matched here first instead of being mistaken for flow input.
-"""
-
 from __future__ import annotations
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import BotCommand, Message
 
 from nekofetch.bots.fsm import FSM
-from nekofetch.core.constants import DIAMOND_FILLED
 from nekofetch.core.container import Container
 from nekofetch.domain.enums import Role
+from nekofetch.ui.components import cb, keyboard
+from nekofetch.ui.typography import bq, bqx, small_caps
 
-# Published to Telegram's command menu. Keep in sync with the handlers below.
 ADMIN_COMMANDS = [
     BotCommand("start", "Open the main panel"),
     BotCommand("help", "Show commands & how the bot works"),
@@ -31,7 +18,6 @@ ADMIN_COMMANDS = [
 
 
 async def publish_admin_commands(client: Client) -> None:
-    """Push the command menu to Telegram. Call once, after the client has started."""
     await client.set_bot_commands(ADMIN_COMMANDS)
 
 
@@ -45,37 +31,41 @@ def register(client: Client, container: Container) -> None:
     @client.on_message(filters.command("help"))
     async def _help(_: Client, message: Message) -> None:
         role = _role(message)
-        lines = [
-            "**◈ NekoFetch — Help**",
-            "",
-            "Most of the bot is button-driven: send /start and tap your way through.",
-            "",
-            "**Commands**",
-            f"{DIAMOND_FILLED} /start — open the main panel",
-            f"{DIAMOND_FILLED} /help — show this message",
-            f"{DIAMOND_FILLED} /cancel — abort whatever you're in the middle of",
-            "",
-            "**Everyone can**",
-            f"{DIAMOND_FILLED} Request Anime — search a title, pick a season/scope, submit",
-            f"{DIAMOND_FILLED} My Requests — track the status of what you asked for",
+        blocks = [
+            bq("<b>◆ /sᴛᴀʀᴛ</b> — ᴏᴘᴇɴ ᴛʜᴇ ᴍᴀɪɴ ᴘᴀɴᴇʟ"),
+            bq("<b>◆ /ʜᴇʟᴘ</b> — sʜᴏᴡ ᴛʜɪs ᴍᴇssᴀɢᴇ"),
+            bq("<b>◆ /ᴄᴀɴᴄᴇʟ</b> — ᴀʙᴏʀᴛ ᴡʜᴀᴛᴇᴠᴇʀ ʏᴏᴜ'ʀᴇ ɪɴ ᴛʜᴇ ᴍɪᴅᴅʟᴇ ᴏꜰ"),
+        ]
+        everyone_blocks = [
+            bq(f"<b>◆ ʀᴇǫᴜᴇsᴛ ᴀɴɪᴍᴇ</b> — sᴇᴀʀᴄʜ ᴀ ᴛɪᴛʟᴇ, ᴘɪᴄᴋ ᴀ sᴇᴀsᴏɴ/sᴄᴏᴘᴇ, sᴜʙᴍɪᴛ"),
+            bq(f"<b>◆ ᴍʏ ʀᴇǫᴜᴇsᴛs</b> — ᴛʀᴀᴄᴋ ᴛʜᴇ sᴛᴀᴛᴜs ᴏꜰ ᴡʜᴀᴛ ʏᴏᴜ ᴀsᴋᴇᴅ ꜰᴏʀ"),
+        ]
+        text_blocks = [
+            bq("<b>ʜᴇʟᴘ</b>"),
+            bq("ᴍᴏsᴛ ᴏꜰ ᴛʜᴇ ʙᴏᴛ ɪs ʙᴜᴛᴛᴏɴ-ᴅʀɪᴠᴇɴ: sᴇɴᴅ /sᴛᴀʀᴛ ᴀɴᴅ ᴛᴀᴘ ʏᴏᴜʀ ᴡᴀʏ ᴛʜʀᴏᴜɢʜ."),
+            bq("<b>ᴄᴏᴍᴍᴀɴᴅs</b>"),
+            *blocks,
+            bq("<b>ᴇᴠᴇʀʏᴏɴᴇ ᴄᴀɴ</b>"),
+            *everyone_blocks,
         ]
         if role in (Role.STAFF, Role.ADMIN):
-            lines += [
-                "",
-                "**Staff can also**",
-                f"{DIAMOND_FILLED} Review Requests — approve a pending request into the queue, or reject it",
-                f"{DIAMOND_FILLED} Downloads Queue — watch live download progress",
-                f"{DIAMOND_FILLED} Approvals — publish / reprocess / cancel finished content",
-            ]
+            text_blocks.extend([
+                bq("<b>sᴛᴀꜰꜰ ᴄᴀɴ ᴀʟsᴏ</b>"),
+                bq("<b>◆ ʀᴇᴠɪᴇᴡ ʀᴇǫᴜᴇsᴛs</b> — ᴀᴘᴘʀᴏᴠᴇ ᴀ ᴘᴇɴᴅɪɴɢ ʀᴇǫᴜᴇsᴛ ɪɴᴛᴏ ᴛʜᴇ ǫᴜᴇᴜᴇ, ᴏʀ ʀᴇᴊᴇᴄᴛ ɪᴛ"),
+                bq("<b>◆ ᴅᴏᴡɴʟᴏᴀᴅs ǫᴜᴇᴜᴇ</b> — ᴡᴀᴛᴄʜ ʟɪᴠᴇ ᴅᴏᴡɴʟᴏᴀᴅ ᴘʀᴏɢʀᴇss"),
+                bq("<b>◆ ᴀᴘᴘʀᴏᴠᴀʟs</b> — ᴘᴜʙʟɪsʜ / ʀᴇᴘʀᴏᴄᴇss / ᴄᴀɴᴄᴇʟ ꜰɪɴɪsʜᴇᴅ ᴄᴏɴᴛᴇɴᴛ"),
+            ])
         if role is Role.ADMIN:
-            lines += [
-                "",
-                "**Admins can also**",
-                f"{DIAMOND_FILLED} Admin Panel — Settings · Analytics · Staff · Bots · Storage · Broadcast",
-            ]
-        await message.reply("\n".join(lines))
+            text_blocks.extend([
+                bq("<b>ᴀᴅᴍɪɴs ᴄᴀɴ ᴀʟsᴏ</b>"),
+                bq("<b>◆ ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ</b> — sᴇᴛᴛɪɴɢs · ᴀɴᴀʟʏᴛɪᴄs · sᴛᴀꜰꜰ · ʙᴏᴛs · sᴛᴏʀᴀɢᴇ · ʙʀᴏᴀᴅᴄᴀsᴛ"),
+            ])
+        await message.reply("\n\n".join(text_blocks), parse_mode=ParseMode.HTML)
 
     @client.on_message(filters.command("cancel"))
     async def _cancel(_: Client, message: Message) -> None:
         await fsm.clear(message.from_user.id)
-        await message.reply("Cancelled. Send /start to open the menu.")
+        await message.reply(
+            bq("ᴄᴀɴᴄᴇʟʟᴇᴅ. sᴇɴᴅ /sᴛᴀʀᴛ ᴛᴏ ᴏᴘᴇɴ ᴛʜᴇ ᴍᴇɴᴜ."),
+            parse_mode=ParseMode.HTML,
+        )

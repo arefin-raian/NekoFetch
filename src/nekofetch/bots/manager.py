@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 
+from pyrogram.enums import ParseMode
+
 from nekofetch.core.container import Container
 from nekofetch.core.logging import get_logger
+from nekofetch.ui.typography import bq
 
 log = get_logger(__name__)
 
@@ -46,6 +49,15 @@ class BotManager:
             await self._load_distribution_bots()
 
         await self._start_background_workers()
+
+    async def _alert_admin(self, text: str) -> None:
+        owner_id = self._c.config.security.owner_id
+        if not owner_id or not self._admin:
+            return
+        try:
+            await self._admin.send_message(owner_id, bq(text), parse_mode=ParseMode.HTML)
+        except Exception as exc:
+            log.warning("bot.alert_admin.failed", error=str(exc))
 
     async def _preflight_channels(self) -> None:
         """Resolve every configured Telegram channel at startup and retry in background."""
@@ -104,6 +116,13 @@ class BotManager:
             except Exception:
                 log.debug("bots.channel.retry_pending", channel=name, id=cid, attempt=attempt)
         log.warning("bots.channel.retry_exhausted", channel=name, id=cid)
+        await self._alert_admin(
+            f"❌ <b>ᴄʜᴀɴɴᴇʟ ʀᴇᴛʀʏ ᴇxʜᴀᴜsᴛᴇᴅ!</b>\n\n"
+            f"<b>ᴄʜᴀɴɴᴇʟ:</b> <code>{name}</code>\n"
+            f"<b>ɪᴅ:</b> <code>{cid}</code>\n\n"
+            f"ᴄᴏᴜʟᴅ ɴᴏᴛ ʀᴇsᴏʟᴠᴇ ᴄʜᴀɴɴᴇʟ ᴘᴇᴇʀ ᴀꜰᴛᴇʀ {_RESOLVE_MAX_RETRIES} ᴀᴛᴛᴇᴍᴘᴛs. "
+            f"ᴍᴀᴋᴇ sᴜʀᴇ ᴛʜᴇ ʙᴏᴛ ɪs ᴀɴ ᴀᴅᴍɪɴ ᴏꜰ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀɴᴅ ᴛʜᴀᴛ ᴀ ᴍᴇssᴀɢᴇ ʜᴀs ʙᴇᴇɴ ᴘᴏsᴛᴇᴅ."
+        )
 
     async def _publish_commands(self, client, *, kind: str) -> None:
         """Publish the Telegram command menu so users can discover commands.
@@ -175,6 +194,12 @@ class BotManager:
                 log.info("bots.distribution.started", bot=row.name, id=row.id)
             except Exception as exc:  # one bad token must not stop the fleet
                 log.error("bots.distribution.failed", id=row.id, error=str(exc))
+            await self._alert_admin(
+                f"⚠️ <b>ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛ ꜰᴀɪʟᴇᴅ ᴛᴏ sᴛᴀʀᴛ</b>\n\n"
+                f"<b>ɪᴅ:</b> <code>{row.id}</code>\n"
+                f"<b>ɴᴀᴍᴇ:</b> <code>{row.name}</code>\n"
+                f"<b>ᴇʀʀᴏʀ:</b> <code>{str(exc)[:200]}</code>"
+            )
 
     def get_client(self, bot_id: int):
         """Return the running Pyrogram client for a distribution bot, if any."""

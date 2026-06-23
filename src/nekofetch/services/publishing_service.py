@@ -77,6 +77,7 @@ class PublishingService:
             req = await RequestRepository(session).get_by_code(code)
             if req is None:
                 raise NotFound(code)
+            user_id = req.user_id
             files = await self._files_for_request(session, req.id)
             for f in files:
                 f.published = True
@@ -84,7 +85,6 @@ class PublishingService:
             count = len(files)
             anime_doc_id = req.anime_doc_id or req.source_ref
             title = req.anime_title
-            # Snapshot file rows for upload outside the session.
             snapshot = [
                 {"season": f.season, "episode": f.episode, "resolution": f.resolution,
                  "audio": f.audio, "path": f.local_path}
@@ -98,7 +98,6 @@ class PublishingService:
         )
         await self._upload_packs(anime_doc_id, title, snapshot)
 
-        # Post to the main channel + refresh the index entry (both no-op when disabled).
         from nekofetch.services.index_channel_service import IndexChannelService
         from nekofetch.services.main_channel_service import MainChannelService
 
@@ -112,6 +111,10 @@ class PublishingService:
         await LogChannelService(self._c).event(
             "publish", "approved", code=code, anime=title, files=count
         )
+
+        if user_id:
+            from nekofetch.services.notification_service import NotificationService
+            await NotificationService(self._c).request_published(user_id, title, code)
         return count
 
     async def _upload_packs(self, anime_doc_id: str, title: str, files: list[dict]) -> None:

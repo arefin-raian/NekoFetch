@@ -1,14 +1,9 @@
-"""Admin tools: broadcast to all users.
-
-Sends a copy of the admin's next message to every (non-banned) user, sequentially with a
-small delay to stay within Telegram limits. Reports delivered/failed counts.
-"""
-
 from __future__ import annotations
 
 import asyncio
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import CallbackQuery, Message
 
 from nekofetch.bots.fsm import FSM
@@ -17,6 +12,8 @@ from nekofetch.domain.enums import Permission
 from nekofetch.infrastructure.database.postgres.session import session_scope
 from nekofetch.infrastructure.repositories.user_repo import UserRepository
 from nekofetch.services.auth_service import AuthService
+from nekofetch.ui.progress import loading_animation
+from nekofetch.ui.typography import bq
 
 STATE_BROADCAST = "admin:await_broadcast"
 
@@ -38,11 +35,12 @@ def register(client: Client, container: Container) -> None:
         await fsm.set(q.from_user.id, STATE_BROADCAST)
         await q.answer()
         await q.message.edit_text(
-            "**Broadcast**\n\nSend the message to broadcast (text or media). "
-            "It will be copied to all users."
+            bq("<b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\n"
+               "sᴇɴᴅ ᴛʜᴇ ᴍᴇssᴀɢᴇ ᴛᴏ ʙʀᴏᴀᴅᴄᴀsᴛ (ᴛᴇxᴛ ᴏʀ ᴍᴇᴅɪᴀ). "
+               "ɪᴛ ᴡɪʟʟ ʙᴇ ᴄᴏᴘɪᴇᴅ ᴛᴏ ᴀʟʟ ᴜsᴇʀs."),
+            parse_mode=ParseMode.HTML,
         )
 
-    # Group 5 so it coexists with the other stateful text handlers.
     @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=5)
     async def _broadcast(_: Client, message: Message) -> None:
         if not message.from_user:
@@ -55,13 +53,16 @@ def register(client: Client, container: Container) -> None:
         async with session_scope(container.pg_sessionmaker) as session:
             ids = await UserRepository(session).all_telegram_ids()
 
-        status = await message.reply(f"Broadcasting to {len(ids)} users…")
+        status = await message.reply(
+            "<code>ʙʀᴏᴀᴅᴄᴀsᴛɪɴɢ!</code>", parse_mode=ParseMode.HTML
+        )
+        await loading_animation(status, "ʙʀᴏᴀᴅᴄᴀsᴛɪɴɢ")
         sent = failed = 0
         for uid in ids:
             try:
                 await message.copy(uid)
                 sent += 1
-            except Exception:  # noqa: BLE001 - blocked/deactivated users
+            except Exception:
                 failed += 1
             await asyncio.sleep(0.05)
 
@@ -70,4 +71,8 @@ def register(client: Client, container: Container) -> None:
         await LogChannelService(container).event(
             "admin", "broadcast", sent=sent, failed=failed, by=message.from_user.id
         )
-        await status.edit_text(f"**Broadcast complete**\n\nDelivered: {sent}\nFailed: {failed}")
+        await status.edit_text(
+            f"{bq('<b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴄᴏᴍᴘʟᴇᴛᴇ</b>')}\n\n"
+            f"{bq(f'ᴅᴇʟɪᴠᴇʀᴇᴅ: <code>{sent}</code>\nꜰᴀɪʟᴇᴅ: <code>{failed}</code>')}",
+            parse_mode=ParseMode.HTML,
+        )

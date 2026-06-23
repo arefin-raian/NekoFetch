@@ -1,5 +1,3 @@
-"""Admin/user inline keyboards."""
-
 from __future__ import annotations
 
 from pyrogram.types import InlineKeyboardMarkup
@@ -17,17 +15,17 @@ def welcome_keyboard(localizer: Localizer, role: Role, lang: str = "en") -> Inli
         ]
     ]
     if role in (Role.STAFF, Role.ADMIN):
-        rows.append([("▸ Review Requests", cb("staff", "requests", 0)),
-                     ("▸ Downloads Queue", cb("queue", "view", 0))])
+        rows.append([("▸ ʀᴇᴠɪᴇᴡ ʀᴇǫᴜᴇsᴛs", cb("staff", "requests", 0)),
+                     ("▸ ᴅᴏᴡɴʟᴏᴀᴅs ǫᴜᴇᴜᴇ", cb("queue", "view", 0))])
     if role is Role.ADMIN:
-        rows.append([("◈ Admin Panel", cb("admin", "home"))])
+        rows.append([("◈ ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ", cb("admin", "home"))])
     return keyboard(*rows)
 
 
 def admin_home_keyboard() -> InlineKeyboardMarkup:
     return keyboard(
-        [("▸ Queue", cb("queue", "view", 0)), ("▸ Analytics", cb("admin", "analytics"))],
-        [("▸ Staff", cb("admin", "staff")), ("▸ Bots", cb("admin", "bots"))],
-        [("▸ Settings", cb("settings", "home")), ("▸ Storage", cb("admin", "storage"))],
-        [("▸ Approvals", cb("approve", "panel")), ("▸ Broadcast", cb("admin", "broadcast"))],
+        [("▸ ǫᴜᴇᴜᴇ", cb("queue", "view", 0)), ("▸ ᴀɴᴀʟʏᴛɪᴄs", cb("admin", "analytics"))],
+        [("▸ sᴛᴀꜰꜰ", cb("admin", "staff")), ("▸ ʙᴏᴛs", cb("admin", "bots"))],
+        [("▸ sᴇᴛᴛɪɴɢs", cb("settings", "home")), ("▸ sᴛᴏʀᴀɢᴇ", cb("admin", "storage"))],
+        [("▸ ᴀᴘᴘʀᴏᴠᴀʟs", cb("approve", "panel")), ("▸ ʙʀᴏᴀᴅᴄᴀsᴛ", cb("admin", "broadcast"))],
     )
