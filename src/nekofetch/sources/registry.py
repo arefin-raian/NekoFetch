@@ -37,10 +37,12 @@ class SourceRegistry:
 
 def build_default_registry() -> SourceRegistry:
     """Register all built-in authorized sources."""
+    from nekofetch.sources.anikoto import AnikotoSource
     from nekofetch.sources.kickassanime import KickAssAnimeSource
     from nekofetch.sources.local import LocalFileSource
 
     registry = SourceRegistry()
     registry.register(LocalFileSource)
     registry.register(KickAssAnimeSource)
+    registry.register(AnikotoSource)
     return registry

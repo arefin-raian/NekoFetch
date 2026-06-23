@@ -273,7 +273,7 @@ class IndexChannelConfig(BaseModel):
 
 
 class SourcesConfig(BaseModel):
-    enabled: list[str] = Field(default_factory=lambda: ["local"])
+    enabled: list[str] = Field(default_factory=lambda: ["local", "anikoto"])
     default: str = "local"
 
 
