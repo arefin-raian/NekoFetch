@@ -484,20 +484,28 @@ class KickAssAnimeSource(AnimeSource):
 
         if ".m3u8" in url:
             try:
-                resp = await self.http.get(url)
+                resp = await self.http.get(
+                    url,
+                    headers={"Referer": "https://kaa.lt/"},
+                )
                 resp.raise_for_status()
                 lines = resp.text.splitlines()
-                qualities = []
+                qualities: list[str] = []
                 for i, line in enumerate(lines):
                     if line.startswith("#EXT-X-STREAM-INF"):
                         m = re.search(r"RESOLUTION=\d+x(\d+)", line)
                         if m:
                             qualities.append(f"{m.group(1)}p")
-                        elif i + 1 < len(lines):
-                            q = re.search(r"(\d+)p", lines[i + 1])
-                            if q:
-                                qualities.append(f"{q.group(1)}p")
-                return sorted(set(qualities), key=lambda x: int(x.rstrip("p")), reverse=True) or [self.preferred_quality]
+                if not qualities:
+                    for i, line in enumerate(lines):
+                        if line.startswith("#EXT-X-STREAM-INF"):
+                            if i + 1 < len(lines):
+                                q = re.search(r"(\d+)p", lines[i + 1])
+                                if q:
+                                    qualities.append(f"{q.group(1)}p")
+                return sorted(
+                    set(qualities), key=lambda x: int(x.rstrip("p")), reverse=True
+                ) or [self.preferred_quality]
             except httpx.HTTPError:
                 return [self.preferred_quality]
 
