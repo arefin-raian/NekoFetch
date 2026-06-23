@@ -98,6 +98,32 @@ def _find_ffmpeg() -> str | None:
     return None
 
 
+# ISO 639-1 → 639-2 mapping for MKV language metadata
+_LANG_MAP: dict[str, str] = {
+    "ja": "jpn", "jp": "jpn",
+    "en": "eng", "us": "eng",
+    "es": "spa",
+    "ko": "kor",
+    "zh": "zho", "cn": "zho",
+    "fr": "fra",
+    "de": "deu",
+    "it": "ita",
+    "pt": "por",
+    "ru": "rus",
+    "ar": "ara",
+    "hi": "hin",
+    "th": "tha",
+    "vi": "vie",
+    "id": "ind",
+    "ms": "msa",
+    "tl": "tgl",
+}
+
+
+def _to_iso6392(code: str) -> str:
+    return _LANG_MAP.get(code.lower(), code)
+
+
 class KickAssAnimeSource(AnimeSource):
     name = "kickassanime"
 
@@ -564,6 +590,56 @@ class KickAssAnimeSource(AnimeSource):
             await asyncio.sleep(min(2 ** attempt, 10))
         return resp
 
+    async def _run_ytdlp(
+        self,
+        url: str,
+        output: Path,
+        origin_host: str,
+        *,
+        concurrent: int = 10,
+    ) -> None:
+        """Run yt-dlp on a single HLS playlist with IDM-style parallel fragments."""
+        user_agent = (
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
+        )
+        referer = f"https://{origin_host}/"
+
+        yt_cmd = [
+            "yt-dlp",
+            "--concurrent-fragments", str(concurrent),
+            "--referer", referer,
+            "--add-headers", f"Origin: https://{origin_host}",
+            "--add-headers", f"Referer: {referer}",
+            "--user-agent", user_agent,
+            "--retries", "10",
+            "--fragment-retries", "15",
+            "--output", str(output),
+            url,
+        ]
+
+        for attempt in range(3):
+            proc = await asyncio.create_subprocess_exec(
+                *yt_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode == 0:
+                return
+            msg = stderr.decode(errors="replace")[-300:]
+            log.warning(
+                "yt-dlp attempt %d/3 failed (exit %d): %s",
+                attempt + 1, proc.returncode, msg,
+            )
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt)
+        else:
+            err = stderr.decode(errors="replace")[-500:]
+            raise RuntimeError(
+                f"yt-dlp failed after 3 attempts for {url}: {err}"
+            )
+
     async def _download_hls(
         self,
         manifest_url: str,
@@ -583,110 +659,143 @@ class KickAssAnimeSource(AnimeSource):
         }
         master_headers = {**seg_headers, "Referer": "https://kaa.lt/"}
 
-        # Pre-fetch master manifest (handles 521 via retry)
+        if not shutil.which("yt-dlp"):
+            raise RuntimeError("yt-dlp not found on PATH — pip install yt-dlp")
+
+        # ── 1. Fetch master manifest (retry handles 521) ───────────────
         resp = await self._retry_get(manifest_url, master_headers)
         resp.raise_for_status()
+        manifest = resp.text
 
         ffmpeg_bin = _find_ffmpeg()
         if not ffmpeg_bin:
             raise RuntimeError("ffmpeg not found — required for HLS muxing")
 
-        # Download WebVTT subtitles (separate CDN, not in HLS manifest)
-        sub_file: Path | None = None
-        sub_lang = "eng"
+        # ── 2. Parse : video playlist + ALL audio playlists ────────────
+        lines = manifest.splitlines()
+        video_url: str | None = None
+        audio_tracks: list[tuple[str, str, str]] = []  # (name, lang_639_2, url)
+
+        for i, line in enumerate(lines):
+            if line.startswith("#EXT-X-MEDIA:TYPE=AUDIO"):
+                m = re.search(r'NAME="([^"]+)".*LANGUAGE="([^"]+)".*URI="([^"]+)"', line)
+                if m:
+                    name = m.group(1)
+                    raw_lang = m.group(2)
+                    lang = _to_iso6392(raw_lang)
+                    au_url = _fix_url(m.group(3), manifest_url)
+                    audio_tracks.append((name, lang, au_url))
+            elif line.startswith("#EXT-X-STREAM-INF"):
+                if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
+                    candidate = _fix_url(lines[i + 1], manifest_url)
+                    if video_url is None or re.search(r"RESOLUTION=\d+x1080?", line):
+                        video_url = candidate
+
+        if not video_url:
+            raise RuntimeError("No video playlist found in master manifest")
+
+        log.info(
+            "Found 1 video + %d audio tracks — %s",
+            len(audio_tracks),
+            ", ".join(f"{n} ({l})" for n, l, _ in audio_tracks),
+        )
+
+        # ── 3. Download ALL subtitle tracks ────────────────────────────
+        sub_files: list[tuple[Path, str]] = []
         if subtitles:
-            for lang_name, sub_url in subtitles:
+            async def _dl_sub(idx: int, lang_name: str, raw_url: str) -> tuple[Path, str] | None:
                 try:
-                    sr = await self.http.get(sub_url, headers=seg_headers)
+                    u = _fix_url(raw_url)
+                    sr = await self.http.get(u, headers=seg_headers)
                     sr.raise_for_status()
-                    sub_file = dest.parent / f".{dest.stem}.sub.vtt"
-                    sub_file.write_bytes(sr.content)
+                    sf = dest.parent / f".{dest.stem}.sub{idx}.vtt"
+                    sf.write_bytes(sr.content)
                     m = re.search(r"\((\w+)\)", lang_name)
-                    if m:
-                        sub_lang = m.group(1)
+                    lc = _to_iso6392(m.group(1) if m else "eng")
                     log.info("Downloaded subtitle: %s", lang_name)
-                    break
-                except Exception:
-                    log.warning("Failed to download subtitle: %s", lang_name)
+                    return (sf, lc)
+                except Exception as e:
+                    log.warning("Failed subtitle '%s': %s", lang_name, e)
+                    return None
 
-        # ── yt-dlp: download video + audio, merge into temp MKV ────────
-        if not shutil.which("yt-dlp"):
-            raise RuntimeError("yt-dlp not found on PATH — install it (pip install yt-dlp)")
+            sub_results = await asyncio.gather(*[
+                _dl_sub(idx, ln, su) for idx, (ln, su) in enumerate(subtitles)
+            ])
+            sub_files = [r for r in sub_results if r is not None]
 
+        # ── 4. IDM-style: concurrent yt-dlp for video + ALL audio ─────
         if on_progress:
             await on_progress(0, 1)
 
-        yt_output = dest.parent / f".{dest.stem}.ytdlp.mkv"
-        user_agent = (
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
+        video_raw = dest.parent / f".{dest.stem}.video.mp4"
+        audio_raw_list: list[tuple[Path, str, str]] = []  # (path, name, lang)
+
+        # Build yt-dlp tasks for every track
+        dl_tasks: list[asyncio.Task] = []
+
+        async def _dl_video():
+            await self._run_ytdlp(
+                video_url, video_raw, origin_host, concurrent=15,
+            )
+
+        async def _dl_audio(name: str, lang: str, au_url: str):
+            af = dest.parent / f".{dest.stem}.audio.{lang}.mp4"
+            audio_raw_list.append((af, name, lang))
+            await self._run_ytdlp(
+                au_url, af, origin_host, concurrent=10,
+            )
+
+        dl_tasks.append(asyncio.create_task(_dl_video()))
+        for name, lang, au_url in audio_tracks:
+            dl_tasks.append(asyncio.create_task(_dl_audio(name, lang, au_url)))
+
+        await asyncio.gather(*dl_tasks)
+
+        # ── 5. ffmpeg: mux all tracks into single MKV ──────────────────
+        cmd = [ffmpeg_bin, "-y"]
+        cmd.extend(["-i", str(video_raw)])
+        for af, _, _ in audio_raw_list:
+            cmd.extend(["-i", str(af)])
+        for sf, _ in sub_files:
+            cmd.extend(["-i", str(sf)])
+
+        cmd.extend(["-c", "copy", "-map", "0:v"])
+
+        for i, (_, _, lang) in enumerate(audio_raw_list):
+            cmd.extend([
+                "-map", f"{i + 1}:a",
+                f"-metadata:s:a:{i}", f"language={lang}",
+            ])
+
+        for i, (_, lang) in enumerate(sub_files):
+            sidx = len(audio_raw_list) + i
+            cmd.extend([
+                "-map", f"{sidx + 1}:s",
+                f"-metadata:s:s:{i}", f"language={lang}",
+            ])
+
+        cmd.append(str(dest))
+
+        log.info(
+            "Muxing 1 video + %d audio + %d subtitle tracks ...",
+            len(audio_raw_list), len(sub_files),
         )
-        referer = f"https://{origin_host}/"
-
-        yt_cmd = [
-            "yt-dlp",
-            "--merge-output-format", "mkv",
-            "--referer", referer,
-            "--add-headers", f"Origin: https://{origin_host}",
-            "--add-headers", f"Referer: {referer}",
-            "--user-agent", user_agent,
-            "--ffmpeg-location", str(Path(ffmpeg_bin).parent),
-            "--retries", "10",
-            "--fragment-retries", "15",
-            "--output", str(yt_output),
-            manifest_url,
-        ]
-
-        for attempt in range(3):
-            proc = await asyncio.create_subprocess_exec(
-                *yt_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg mux failed (exit {proc.returncode}): "
+                f"{stderr.decode(errors='replace')[-300:]}"
             )
-            _, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                break
-            msg = stderr.decode(errors="replace")[-300:]
-            log.warning("yt-dlp attempt %d failed (exit %d): %s", attempt + 1, proc.returncode, msg)
-            if attempt < 2:
-                await asyncio.sleep(2 ** attempt)
-                # Re-warm Cloudflare cache before retry
-                try:
-                    await self.http.get(manifest_url, headers=master_headers)
-                except Exception:
-                    pass
-        else:
-            err = stderr.decode(errors="replace")[-500:]
-            raise RuntimeError(f"yt-dlp failed after 3 attempts: {err}")
 
-        # ── Embed subtitles via stream-copy ffmpeg pass ────────────────
-        if sub_file and yt_output.exists():
-            final_dest = dest.parent / f".{dest.stem}.final.mkv"
-            cmd = [
-                ffmpeg_bin, "-y",
-                "-i", str(yt_output),
-                "-i", str(sub_file),
-                "-c", "copy",
-                "-map", "0",
-                "-map", "1:s:0",
-                "-metadata:s:s:0", f"language={sub_lang}",
-                str(final_dest),
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                log.warning("Subtitle embed failed, keeping without subs: %s", stderr.decode(errors="replace")[-200:])
-                yt_output.rename(dest)
-            else:
-                final_dest.rename(dest)
-                yt_output.unlink(missing_ok=True)
-            sub_file.unlink(missing_ok=True)
-        elif yt_output.exists():
-            yt_output.rename(dest)
+        # Cleanup temp files
+        video_raw.unlink(missing_ok=True)
+        for af, _, _ in audio_raw_list:
+            af.unlink(missing_ok=True)
+        for sf, _ in sub_files:
+            sf.unlink(missing_ok=True)
 
         total_bytes = dest.stat().st_size
         if on_progress:
