@@ -15,18 +15,29 @@ import asyncio
 import hashlib
 import json
 import re
-import shutil
-import subprocess
-import sys
 import time
 import urllib.parse
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urljoin
 
 import httpx
 
 from nekofetch.core.logging import get_logger
 from nekofetch.domain.enums import AudioType
+from nekofetch.sources._hls import (
+    RECOMMENDED_LIMITS,
+    RECOMMENDED_TIMEOUT,
+    download_hls_ts,
+    download_subtitles,
+    find_ffmpeg,
+    maybe_remux,
+)
+from nekofetch.sources._mux import (
+    WANTED_AUDIO,
+    assemble_final,
+    audio_label,
+    normalize_audio_lang,
+)
 from nekofetch.sources.base import (
     AnimeDetails,
     AnimeSource,
@@ -89,16 +100,6 @@ def _fix_url(raw: str, base: str | None = None) -> str:
     return re.sub(r"^(https?)//+", r"\1://", raw)
 
 
-def _find_ffmpeg() -> str | None:
-    ffmpeg_bin = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe")
-    if ffmpeg_bin:
-        return ffmpeg_bin
-    for p in [r"C:\Program Files\ShareX\ffmpeg.exe"]:
-        if Path(p).exists():
-            return p
-    return None
-
-
 # ISO 639-1 → 639-2 mapping for MKV language metadata
 _LANG_MAP: dict[str, str] = {
     "ja": "jpn", "jp": "jpn",
@@ -148,7 +149,8 @@ class KickAssAnimeSource(AnimeSource):
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
             self._http = httpx.AsyncClient(
-                timeout=30.0,
+                timeout=RECOMMENDED_TIMEOUT,
+                limits=RECOMMENDED_LIMITS,
                 headers={
                     "User-Agent": (
                         "Mozilla/5.0 (Linux; Android 10; K) "
@@ -309,66 +311,87 @@ class KickAssAnimeSource(AnimeSource):
         if not ep_path:
             return []
 
+        # ep_path may be "<locale>/ep-N-<slug>" or just "ep-N-<slug>".
         lang = self.preferred_lang
         parts = ep_path.split("/")
-        if len(parts) >= 2 and parts[0] in ("ja-JP", "en-US"):
+        if len(parts) >= 2 and re.match(r"^[a-z]{2}(-[\w]+)?$", parts[0]):
             lang = parts[0]
             ep_path = "/".join(parts[1:])
 
-        ep_part = ep_path.replace("ep-", "episode/ep-")
-        url = f"{self.api_url}/{slug}/{ep_part}"
+        stream = await self._resolve_stream(slug, ep_path)
+        if not stream:
+            return []
 
-        resp = await self._retry_get(url, {"Referer": f"{self.base_url}/"}, retries=3)
-        if resp.status_code != 200:
-            log.warning("get_variants.api_failed", url=url, status=resp.status_code)
-            servers = await self._scrape_servers_from_page(f"{self.base_url}/{slug}/{ep_path}")
-            if not servers:
-                return []
-        else:
-            data = resp.json()
-            servers = data.get("servers", [])
-
-        audio_type = AudioType.SUBBED if lang == self.preferred_lang else AudioType.DUBBED
-        lang_label = "japanese" if lang == "ja-JP" else "english"
+        ep_num = self._ep_num(ep_path)
+        audio_type = AudioType.DUBBED if lang == self.second_lang else AudioType.SUBBED
+        lang_label = "english" if lang.startswith("en") else "japanese"
 
         variants: list[VideoVariant] = []
+        for q in stream["qualities"]:
+            variants.append(
+                VideoVariant(
+                    source_ref=json.dumps({
+                        "video_url": _fix_url(stream["hls"]),
+                        "server": stream["server"],
+                        "quality": q,
+                        "player_url": stream["player_url"],
+                        "subtitles": stream["subtitles"],
+                        # context for cross-language (separate-variant) merging:
+                        "kaa_slug": slug,
+                        "kaa_locale": lang,
+                        "kaa_ep_num": ep_num,
+                    }),
+                    resolution=q,
+                    audio=audio_type,
+                    languages=[lang_label],
+                    subtitles=[s[0] for s in stream["subtitles"]],
+                )
+            )
+        return variants
+
+    @staticmethod
+    def _ep_num(ep_path: str) -> str:
+        m = re.search(r"ep-([\d.]+)", ep_path)
+        return m.group(1) if m else "1"
+
+    async def _resolve_stream(self, slug: str, ep_path: str) -> dict | None:
+        """Resolve one episode (slug + ep-path) to a playable stream.
+
+        Returns ``{hls, player_url, server, qualities, subtitles}`` for the first
+        working server, or ``None``. Tries the JSON API then the page-scrape
+        fallback, so it works across modern and older page layouts.
+        """
+        ep_part = ep_path.replace("ep-", "episode/ep-")
+        url = f"{self.api_url}/{slug}/{ep_part}"
+        resp = await self._retry_get(url, {"Referer": f"{self.base_url}/"}, retries=3)
+        if resp.status_code == 200:
+            servers = resp.json().get("servers", [])
+        else:
+            log.warning("get_variants.api_failed", url=url, status=resp.status_code)
+            servers = await self._scrape_servers_from_page(f"{self.base_url}/{slug}/{ep_path}")
 
         for server in servers:
-            name = server.get("name", "")
-            src = server.get("src", "")
-
-            video = await self._extract_video(src, name)
-            if video is None:
+            video = await self._extract_video(server.get("src", ""), server.get("name", ""))
+            if not video:
                 continue
-
             hls_url = video.get("hls", "") or video.get("dash", "")
             if not hls_url:
                 continue
-
-            subs = video.get("subtitles", [])
-            player_url = video.get("player_url", src)
+            player_url = video.get("player_url", server.get("src", ""))
             origin_host = urllib.parse.urlparse(player_url).hostname
             probe_referer = f"https://{origin_host}/" if origin_host else None
-            qualities = await self._probe_qualities(hls_url, referer=probe_referer)
+            return {
+                "hls": hls_url,
+                "player_url": player_url,
+                "server": server.get("name", ""),
+                "qualities": await self._probe_qualities(hls_url, referer=probe_referer),
+                "subtitles": [
+                    (s.get("name", ""), _fix_url(s.get("src", "")))
+                    for s in video.get("subtitles", [])
+                ],
+            }
+        return None
 
-            for q in qualities:
-                variants.append(
-                    VideoVariant(
-                        source_ref=json.dumps({
-                            "video_url": _fix_url(hls_url),
-                            "server": name,
-                            "quality": q,
-                            "player_url": player_url,
-                            "subtitles": [(s.get("name", ""), _fix_url(s.get("src", ""))) for s in subs],
-                        }),
-                        resolution=q,
-                        audio=audio_type,
-                        languages=[lang_label],
-                        subtitles=[s.get("language", "") for s in subs],
-                    )
-                )
-
-        return variants
 
     async def _extract_video(self, src: str, server_name: str) -> dict | None:
         final_url = src.replace("/vast", "/cat-player/player") if "/vast" in src else src
@@ -594,51 +617,41 @@ class KickAssAnimeSource(AnimeSource):
         info = json.loads(variant.source_ref)
         video_url = info["video_url"]
         quality = info.get("quality", variant.resolution)
-        server = info.get("server", "VidStreaming")
+        player_url = info.get("player_url", "")
+        subs = info.get("subtitles", [])
 
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if on_progress:
+            await on_progress(0, 1)
 
-        ext = ".mkv" if ".m3u8" in video_url else ".mp4"
-        dest = dest.with_suffix(ext)
+        # Episode language only hints the fallback label when a stream has no
+        # separate audio renditions (embedded audio of unknown language).
+        default_lang = "en" if variant.audio == AudioType.DUBBED else "ja"
 
         if ".m3u8" in video_url:
-            player_url = info.get("player_url", "")
-            subs = info.get("subtitles", [])
-            return await self._download_hls(video_url, dest, player_url=player_url, subtitles=subs, quality=quality, on_progress=on_progress)
+            out, extra = await self._download_hls(
+                video_url, dest, player_url=player_url, subtitles=subs,
+                quality=quality, on_progress=on_progress, default_lang=default_lang,
+                locale=info.get("kaa_locale", ""),
+            )
+        else:
+            out, extra = await self._download_direct(
+                video_url, dest, player_url, subs, on_progress,
+            )
 
-        ffmpeg_args = [
-            "ffmpeg",
-            "-y",
-            "-headers", "Referer: https://kaa.lt/\r\n",
-            "-i", video_url,
-            "-c", "copy",
-            "-bsf:a", "aac_adtstoasc" if ext == ".mp4" else "copy",
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            str(dest),
-        ]
-
-        process = await asyncio.create_subprocess_exec(
-            *ffmpeg_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed (exit {process.returncode}): {stderr.decode(errors='replace')[:500]}")
-
-        total = dest.stat().st_size
+        total = out.stat().st_size
         if on_progress:
             await on_progress(total, total)
 
         sha = hashlib.sha256()
-        sha.update(dest.read_bytes())
+        sha.update(out.read_bytes())
 
         return {
             "checksum": sha.hexdigest(),
             "bytes": total,
             "complete": True,
+            "container": out.suffix.lstrip("."),
+            **extra,
         }
 
     async def _retry_get(self, url: str, headers: dict, retries: int = 5) -> httpx.Response:
@@ -649,251 +662,192 @@ class KickAssAnimeSource(AnimeSource):
             await asyncio.sleep(min(2 ** attempt, 10))
         return resp
 
-    async def _run_ytdlp(
-        self,
-        url: str,
-        output: Path,
-        origin_host: str,
-        *,
-        concurrent: int = 10,
-    ) -> None:
-        """Run yt-dlp on a single HLS playlist with IDM-style parallel fragments."""
-        user_agent = (
-            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
-        )
-        referer = f"https://{origin_host}/"
-
-        yt_cmd = [
-            sys.executable, "-m", "yt_dlp",
-            "--concurrent-fragments", str(concurrent),
-            "--referer", referer,
-            "--add-headers", f"Origin: https://{origin_host}",
-            "--add-headers", f"Referer: {referer}",
-            "--user-agent", user_agent,
-            "--retries", "10",
-            "--fragment-retries", "15",
-            "--fixup", "force",
-            "--output", str(output),
-            url,
-        ]
-
-        for attempt in range(3):
-            proc = await asyncio.create_subprocess_exec(
-                *yt_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode == 0:
-                return
-            msg = stderr.decode(errors="replace")[-300:]
-            log.warning(
-                "yt-dlp attempt %d/3 failed (exit %d): %s",
-                attempt + 1, proc.returncode, msg,
-            )
-            if attempt < 2:
-                await asyncio.sleep(2 ** attempt)
-        else:
-            err = stderr.decode(errors="replace")[-500:]
-            raise RuntimeError(
-                f"yt-dlp failed after 3 attempts for {url}: {err}"
-            )
-
     async def _download_hls(
         self,
         manifest_url: str,
         dest: Path,
         *,
         player_url: str = "",
-        subtitles: list[tuple[str, str]] | None = None,
+        subtitles: list | None = None,
         quality: str = "1080p",
         on_progress: ProgressCallback | None = None,
-    ) -> dict:
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        default_lang: str = "ja",
+        locale: str = "",
+    ) -> tuple[Path, dict]:
+        """Download video + ja/en/hi audio + subtitles, mux into one MKV.
 
+        Handles BOTH delivery shapes:
+          1. one master with multiple ``#EXT-X-MEDIA:TYPE=AUDIO`` renditions
+             (modern multi-audio) — pick the ja/en/hi renditions; video is silent.
+          2. separate per-language sources selected via the Sub/Dub dropdown
+             (older/alternative) — the base video carries one embedded audio, and
+             the other languages are downloaded from their own streams and merged.
+        Subtitles are cleaned/styled/branded; ffmpeg muxes everything into one
+        ``.mkv`` with per-track language metadata, labelled SUBBED / DUBBED /
+        Dual Audio / Multi Audio by which of ja/en/hi ended up present.
+        """
         origin_host = urllib.parse.urlparse(player_url).hostname if player_url else "krussdomi.com"
-        seg_headers = {
+        headers = {
             "Accept": "*/*",
             "Origin": f"https://{origin_host}",
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36",
+            "Referer": f"https://{origin_host}/",
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
+            ),
         }
-        master_headers = {**seg_headers, "Referer": f"https://{origin_host}/"}
+        warnings: list[str] = []
+        stem = dest.stem
+        q = quality.rstrip("p")
+        names = {"ja": "Japanese", "en": "English", "hi": "Hindi"}
 
-        # ── 1. Fetch master manifest (retry handles 521) ───────────────
-        resp = await self._retry_get(manifest_url, master_headers)
-        resp.raise_for_status()
-        manifest = resp.text
+        # Parse audio renditions in THIS manifest only. Dual/Multi is determined
+        # solely by how many language-tagged audio tracks live in one manifest —
+        # we never merge separate Sub/Dub variants (they can be different edits).
+        master_txt = (await self._retry_get(manifest_url, headers)).text
+        tagged: dict[str, tuple[str, str]] = {}   # canon -> (name, uri)
+        untagged: list[tuple[str, str]] = []      # (name, uri) with no/foreign lang
+        for line in master_txt.splitlines():
+            if not line.startswith("#EXT-X-MEDIA:TYPE=AUDIO"):
+                continue
+            uri = re.search(r'URI="([^"]+)"', line)
+            if not uri:
+                continue
+            au_url = urljoin(manifest_url, uri.group(1))
+            name_m = re.search(r'NAME="([^"]+)"', line)
+            lang_m = re.search(r'LANGUAGE="([^"]+)"', line)
+            canon = normalize_audio_lang(lang_m.group(1) if lang_m else "")
+            if canon and canon not in tagged:
+                tagged[canon] = (name_m.group(1) if name_m else names[canon], au_url)
+            elif not canon:
+                untagged.append((name_m.group(1) if name_m else "Audio", au_url))
 
-        ffmpeg_bin = _find_ffmpeg()
-        if not ffmpeg_bin:
-            raise RuntimeError("ffmpeg not found — required for HLS muxing")
+        stats: dict = {}
+        video_ts = await download_hls_ts(
+            self.http, manifest_url, headers, q,
+            dest.with_name(f".{stem}.video"), on_progress, stats=stats,
+        )
 
-        # ── 2. Parse : video playlist + ALL audio playlists ────────────
-        lines = manifest.splitlines()
-        video_url: str | None = None
-        audio_tracks: list[tuple[str, str, str]] = []  # (name, lang_639_2, url)
+        covered: set[str] = set()
+        audio_files: list[tuple[Path, str, str]] = []
+        embedded_audio: tuple[str, str] | None = None
+        primary = normalize_audio_lang(locale) or default_lang
 
-        for i, line in enumerate(lines):
-            if line.startswith("#EXT-X-MEDIA:TYPE=AUDIO"):
-                m = re.search(r'NAME="([^"]+)".*LANGUAGE="([^"]+)".*URI="([^"]+)"', line)
-                if m:
-                    name = m.group(1)
-                    raw_lang = m.group(2)
-                    lang = _to_iso6392(raw_lang)
-                    au_url = _fix_url(m.group(3), manifest_url)
-                    audio_tracks.append((name, lang, au_url))
-            elif line.startswith("#EXT-X-STREAM-INF"):
-                if i + 1 < len(lines) and not lines[i + 1].startswith("#"):
-                    candidate = _fix_url(lines[i + 1], manifest_url)
-                    if video_url is None:
-                        video_url = candidate
-                    elif quality != "1080p":
-                        m = re.search(r"RESOLUTION=\d+x(\d+)", line)
-                        if m and m.group(1) == quality.rstrip("p"):
-                            video_url = candidate
-                    else:
-                        m = re.search(r"RESOLUTION=\d+x1080?", line)
-                        if m:
-                            video_url = candidate
-
-        if not video_url:
-            raise RuntimeError("No video playlist found in master manifest")
-
-        if audio_tracks:
-            log.info(
-                "Found 1 video + %d audio tracks — %s",
-                len(audio_tracks),
-                ", ".join(f"{n} ({l})" for n, l, _ in audio_tracks),
-            )
-        else:
-            log.info("Found 1 video with embedded audio (no separate audio tracks)")
-
-        # ── 3. Download ALL subtitle tracks ────────────────────────────
-        sub_files: list[tuple[Path, str]] = []
-        if subtitles:
-            async def _dl_sub(idx: int, lang_name: str, raw_url: str) -> tuple[Path, str] | None:
+        if len(tagged) >= 2:
+            # Genuine multi-audio manifest -> Dual / Multi (ja/en/hi only).
+            for i, canon in enumerate(c for c in WANTED_AUDIO if c in tagged):
+                name, au_url = tagged[canon]
                 try:
-                    u = _fix_url(raw_url)
-                    sr = await self.http.get(u, headers=seg_headers)
-                    sr.raise_for_status()
-                    sf = dest.parent / f".{dest.stem}.sub{idx}.vtt"
-                    sf.write_bytes(sr.content)
-                    m = re.search(r"\((\w+)\)", lang_name)
-                    lc = _to_iso6392(m.group(1) if m else "eng")
-                    log.info("Downloaded subtitle: %s", lang_name)
-                    return (sf, lc)
-                except Exception as e:
-                    log.warning("Failed subtitle '%s': %s", lang_name, e)
-                    return None
-
-            sub_results = await asyncio.gather(*[
-                _dl_sub(idx, ln, su) for idx, (ln, su) in enumerate(subtitles)
-            ])
-            sub_files = [r for r in sub_results if r is not None]
-
-        # ── 4. IDM-style: concurrent yt-dlp for video + ALL audio ─────
-        if on_progress:
-            await on_progress(0, 1)
-
-        video_raw = dest.parent / f".{dest.stem}.video.mp4"
-        audio_raw_list: list[tuple[Path, str, str]] = []  # (path, name, lang)
-
-        # Build yt-dlp tasks for every track
-        dl_tasks: list[asyncio.Task] = []
-
-        async def _dl_video():
-            await self._run_ytdlp(
-                video_url, video_raw, origin_host, concurrent=15,
+                    ap = await download_hls_ts(
+                        self.http, au_url, headers, q,
+                        dest.with_name(f".{stem}.audio{i}.{canon}"),
+                    )
+                    audio_files.append((ap, name, canon))
+                    covered.add(canon)
+                except Exception as exc:  # noqa: BLE001
+                    warnings.append(f"audio rendition '{name}' failed: {exc}")
+        elif len(tagged) == 1:
+            # Single language-tagged rendition; video is silent.
+            canon, (name, au_url) = next(iter(tagged.items()))
+            ap = await download_hls_ts(
+                self.http, au_url, headers, q, dest.with_name(f".{stem}.audio.{canon}"),
             )
-
-        async def _dl_audio(name: str, lang: str, au_url: str):
-            af = dest.parent / f".{dest.stem}.audio.{lang}.mp4"
-            audio_raw_list.append((af, name, lang))
-            await self._run_ytdlp(
-                au_url, af, origin_host, concurrent=10,
+            audio_files.append((ap, name, canon))
+            covered.add(canon)
+        elif untagged:
+            # One audio group with no language (e.g. Solo Leveling's "Default");
+            # it is this episode's single language -> SUBBED/DUBBED.
+            name, au_url = untagged[0]
+            ap = await download_hls_ts(
+                self.http, au_url, headers, q, dest.with_name(f".{stem}.audio.{primary}"),
             )
-
-        dl_tasks.append(asyncio.create_task(_dl_video()))
-        for name, lang, au_url in audio_tracks:
-            dl_tasks.append(asyncio.create_task(_dl_audio(name, lang, au_url)))
-
-        await asyncio.gather(*dl_tasks)
-
-        for f in [video_raw] + [af for af, _, _ in audio_raw_list] + [sf for sf, _ in sub_files]:
-            if not f.exists() or f.stat().st_size == 0:
-                raise RuntimeError(f"Downloaded file missing or empty: {f}")
-
-        # Probe each input with ffprobe/ffmpeg to check the format before muxing
-        for label, f in [("video", video_raw)] + [("audio", af) for af, _, _ in audio_raw_list] + [("sub", sf) for sf, _ in sub_files]:
-            p = await asyncio.create_subprocess_exec(
-                ffmpeg_bin, "-hide_banner", "-i", str(f),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, err = await p.communicate()
-            err_text = err.decode(errors="replace")
-            log.info("mux.input.probe", label=label, path=str(f), size=f.stat().st_size, probe=err_text[:500])
-
-        # ── 5. ffmpeg: mux all tracks into single MKV ──────────────────
-        cmd = [ffmpeg_bin, "-y", "-fflags", "+genpts"]
-        cmd.extend(["-i", str(video_raw)])
-        for af, _, _ in audio_raw_list:
-            cmd.extend(["-i", str(af)])
-        for sf, _ in sub_files:
-            cmd.extend(["-i", str(sf)])
-
-        cmd.extend(["-c:v", "copy", "-c:a", "copy", "-c:s", "copy", "-map", "0:v"])
-
-        if audio_raw_list:
-            for i, (_, _, lang) in enumerate(audio_raw_list):
-                cmd.extend([
-                    "-map", f"{i + 1}:a",
-                    f"-metadata:s:a:{i}", f"language={lang}",
-                ])
+            audio_files.append((ap, names.get(primary, name), primary))
+            covered.add(primary)
         else:
-            cmd.extend(["-map", "0:a"])
+            # No separate audio groups -> audio is embedded in the video stream.
+            embedded_audio = (names.get(primary, primary.upper()), primary)
+            covered.add(primary)
 
-        for i, (_, lang) in enumerate(sub_files):
-            sidx = len(audio_raw_list) + i
-            cmd.extend([
-                "-map", f"{sidx + 1}:s",
-                f"-metadata:s:s:{i}", f"language={lang}",
-            ])
+        label = audio_label(covered)
 
-        cmd.append(str(dest))
+        # --- subtitles ---
+        sub_tracks: list[tuple[str, str, Path]] = []
+        sub_info: list[dict] = []
+        if subtitles:
+            pairs = [
+                (s[0], s[1]) for s in subtitles
+                if isinstance(s, (list, tuple)) and len(s) >= 2
+            ]
+            sub_info = await download_subtitles(self.http, pairs, headers, dest)
+            for s in sub_info:
+                if s.get("saved"):
+                    lang_m = re.search(r"\((\w[\w-]*)\)", s.get("label", ""))
+                    lang = lang_m.group(1) if lang_m else "und"
+                    sub_tracks.append((s["label"], lang, Path(s["saved"])))
 
-        log.info(
-            "Muxing 1 video + %d audio + %d subtitle tracks ...",
-            len(audio_raw_list), len(sub_files),
+        # --- mux ---
+        if not find_ffmpeg():
+            out = maybe_remux(video_ts, dest)
+            warnings.append("ffmpeg not found — saved video-only .ts (no mux)")
+            return out, {"stats": stats, "subtitles": sub_info, "label": label,
+                         "audio_tracks": len(audio_files), "warnings": warnings}
+
+        mkv, sub_meta = await assemble_final(
+            video_ts, audio_files, sub_tracks, dest, title=f"{stem} [{label}]",
+            embedded_audio=embedded_audio,
         )
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            stderr_text = stderr.decode(errors='replace')
-            log.error("ffmpeg.mux.failed", exit_code=proc.returncode, stderr=stderr_text)
-            raise RuntimeError(
-                f"ffmpeg mux failed (exit {proc.returncode}): {stderr_text}"
-            )
-
-        # Cleanup temp files
-        video_raw.unlink(missing_ok=True)
-        for af, _, _ in audio_raw_list:
-            af.unlink(missing_ok=True)
-        for sf, _ in sub_files:
-            sf.unlink(missing_ok=True)
-
-        total_bytes = dest.stat().st_size
-        if on_progress:
-            await on_progress(total_bytes, total_bytes)
-
-        sha = hashlib.sha256()
-        sha.update(dest.read_bytes())
-
-        return {
-            "checksum": sha.hexdigest(),
-            "bytes": total_bytes,
-            "complete": True,
+        audio_tracks = []
+        if embedded_audio is not None:
+            audio_tracks.append({"name": embedded_audio[0], "lang": embedded_audio[1],
+                                 "source": "embedded"})
+        audio_tracks += [{"name": n, "lang": lng, "source": "external"}
+                         for _p, n, lng in audio_files]
+        return mkv, {
+            "stats": stats,
+            "label": label,
+            "subtitles": sub_meta or sub_info,
+            "audio_tracks": audio_tracks,
+            "warnings": warnings,
         }
+
+    async def _download_direct(
+        self,
+        url: str,
+        dest: Path,
+        player_url: str,
+        subtitles: list | None,
+        on_progress: ProgressCallback | None,
+    ) -> tuple[Path, dict]:
+        """Stream a progressive (mp4) file straight to disk, no ffmpeg."""
+        origin_host = urllib.parse.urlparse(player_url).hostname if player_url else "kaa.lt"
+        headers = {
+            "Accept": "*/*",
+            "Origin": f"https://{origin_host}",
+            "Referer": f"https://{origin_host}/",
+            "User-Agent": (
+                "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36"
+            ),
+        }
+        out = dest.with_suffix(Path(url.split("?")[0]).suffix or ".mp4")
+        total = 0
+        async with self.http.stream("GET", url, headers=headers) as resp:
+            resp.raise_for_status()
+            expected = int(resp.headers.get("content-length", 0))
+            with out.open("wb") as fh:
+                async for chunk in resp.aiter_bytes(1 << 16):
+                    fh.write(chunk)
+                    total += len(chunk)
+                    if on_progress and expected:
+                        await on_progress(total, expected)
+        if total == 0:
+            raise RuntimeError("direct download produced an empty file")
+
+        sub_info: list[dict] = []
+        if subtitles:
+            pairs = [
+                (s[0], s[1]) for s in subtitles
+                if isinstance(s, (list, tuple)) and len(s) >= 2
+            ]
+            sub_info = await download_subtitles(self.http, pairs, headers, out)
+        return out, {"stats": {"bytes": total}, "subtitles": sub_info, "warnings": []}

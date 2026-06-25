@@ -40,9 +40,11 @@ def build_default_registry() -> SourceRegistry:
     from nekofetch.sources.anikoto import AnikotoSource
     from nekofetch.sources.kickassanime import KickAssAnimeSource
     from nekofetch.sources.local import LocalFileSource
+    from nekofetch.sources.nyaa import NyaaSource
 
     registry = SourceRegistry()
     registry.register(LocalFileSource)
     registry.register(KickAssAnimeSource)
     registry.register(AnikotoSource)
+    registry.register(NyaaSource)
     return registry

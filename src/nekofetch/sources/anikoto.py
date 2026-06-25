@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import base64
+import hashlib
 import json
 import re
-import subprocess
-import sys
 from pathlib import Path
 
 import httpx
@@ -13,6 +11,15 @@ from bs4 import BeautifulSoup
 
 from nekofetch.core.logging import get_logger
 from nekofetch.domain.enums import AudioType
+from nekofetch.sources._hls import (
+    RECOMMENDED_LIMITS,
+    RECOMMENDED_TIMEOUT,
+    download_hls_ts,
+    download_subtitles,
+    find_ffmpeg,
+    maybe_remux,
+)
+from nekofetch.sources._mux import assemble_final, audio_label
 from nekofetch.sources.base import (
     AnimeDetails,
     AnimeSource,
@@ -24,7 +31,14 @@ from nekofetch.sources.base import (
 
 log = get_logger(__name__)
 
-BASE_URL = "https://anikoto.tv"
+BASE_URL = "https://anikototv.to"
+MAPPER_API = "https://mapper.nekostream.site/api/mal/"
+
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/141.0.0.0 Safari/537.36"
+)
 
 
 class AnikotoSource(AnimeSource):
@@ -43,13 +57,10 @@ class AnikotoSource(AnimeSource):
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
             self._http = httpx.AsyncClient(
-                timeout=30.0,
+                timeout=RECOMMENDED_TIMEOUT,
+                limits=RECOMMENDED_LIMITS,
                 headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/141.0.0.0 Safari/537.36"
-                    ),
+                    "User-Agent": USER_AGENT,
                     "x-requested-with": "XMLHttpRequest",
                 },
                 follow_redirects=True,
@@ -76,21 +87,27 @@ class AnikotoSource(AnimeSource):
         except httpx.HTTPError:
             return await self._popular()
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+        results = self._parse_item_grid(BeautifulSoup(resp.text, "html.parser"))
+        return results or await self._popular()
+
+    def _parse_item_grid(self, soup: BeautifulSoup) -> list[AnimeStub]:
+        """Parse a grid of ``div.item`` cards (search / browse / home listings)."""
         results: list[AnimeStub] = []
         seen: set[str] = set()
-        for item in soup.select("div.flw-item"):
-            anchor = item.select_one("a")
-            img = item.select_one("img")
-            if not anchor:
+        for item in soup.select("div.item"):
+            name_a = item.select_one("a.name.d-title") or item.select_one("a[href*='/watch/']")
+            if not name_a:
                 continue
-            href = anchor.get("href", "")
-            slug = href.strip("/").split("/")[-1] if href.strip("/") else ""
+            href = name_a.get("href", "")
+            # /watch/<slug>/ep-N  ->  <slug>
+            m = re.search(r"/watch/([^/]+)", href)
+            slug = m.group(1) if m else ""
             if not slug or slug in seen:
                 continue
             seen.add(slug)
-            title = anchor.get("title") or img.get("alt", "") if img else ""
-            poster = img.get("data-src") or img.get("src") if img else None
+            img = item.select_one("img")
+            title = name_a.get_text(strip=True) or (img.get("alt", "") if img else "")
+            poster = (img.get("data-src") or img.get("src")) if img else None
             results.append(
                 AnimeStub(
                     source_ref=slug,
@@ -98,7 +115,7 @@ class AnikotoSource(AnimeSource):
                     poster_url=_fix_url(poster) if poster else None,
                 )
             )
-        return results or await self._popular()
+        return results
 
     async def _search_by_slug(self, slug: str) -> AnimeStub | None:
         sections = slug.split("/")
@@ -124,29 +141,7 @@ class AnikotoSource(AnimeSource):
         try:
             resp = await self.http.get(f"{self.base_url}/home")
             resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
-            results: list[AnimeStub] = []
-            seen: set[str] = set()
-            for item in soup.select("div.flw-item"):
-                anchor = item.select_one("a")
-                img = item.select_one("img")
-                if not anchor:
-                    continue
-                href = anchor.get("href", "")
-                slug = href.strip("/").split("/")[-1] if href.strip("/") else ""
-                if not slug or slug in seen:
-                    continue
-                seen.add(slug)
-                title = anchor.get("title") or img.get("alt", "") if img else ""
-                poster = img.get("data-src") or img.get("src") if img else None
-                results.append(
-                    AnimeStub(
-                        source_ref=slug,
-                        title=str(title).strip(),
-                        poster_url=_fix_url(poster) if poster else None,
-                    )
-                )
-            return results
+            return self._parse_item_grid(BeautifulSoup(resp.text, "html.parser"))
         except httpx.HTTPError:
             return []
 
@@ -232,164 +227,174 @@ class AnikotoSource(AnimeSource):
             return []
         video_id, data_ids, data_mal, data_timestamp = parts[:4]
 
-        variants: list[VideoVariant] = []
-        seen_urls: set[str] = set()
+        # Ordered fallback servers per audio type. Each entry is a candidate the
+        # downloader tries in turn until one yields a clean file.
+        #   sub  -> soft subtitles (separate VTT track)
+        #   hsub -> hardcoded subtitles burned into the video
+        #   dub  -> dubbed audio, no subtitles
+        candidates: dict[AudioType, list[dict]] = {
+            AudioType.SUBBED: [],
+            AudioType.DUBBED: [],
+        }
+        seen: set[str] = set()
 
-        try:
-            r = await self.http.get(
-                f"https://mapper.mewcdn.online/api/mal/{data_mal}/{self._ep_number_from_ref(episode_ref)}/{data_timestamp}",
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0"
-                    ),
-                    "referer": self.base_url,
-                    "origin": self.base_url,
-                },
+        def add(kind: str, url: str, referer: str, subtitles: list | None = None) -> None:
+            if not url or url in seen:
+                return
+            seen.add(url)
+            audio = AudioType.DUBBED if kind == "dub" else AudioType.SUBBED
+            candidates[audio].append({
+                "video_url": url,
+                "referer": referer,
+                "kind": kind,
+                "subtitles": subtitles or [],
+            })
+
+        await self._collect_mapper(data_mal, episode_ref, data_timestamp, add)
+        await self._collect_server_list(data_ids, add)
+
+        variants: list[VideoVariant] = []
+        for audio, cands in candidates.items():
+            if not cands:
+                continue
+            # Soft-sub before hard-sub so selectable subtitles win when available.
+            cands.sort(key=lambda c: {"sub": 0, "hsub": 1, "dub": 0}.get(c["kind"], 2))
+            variants.append(
+                VideoVariant(
+                    source_ref=json.dumps({
+                        "candidates": cands,
+                        "quality": self.preferred_quality,
+                    }),
+                    resolution=f"{self.preferred_quality}p",
+                    audio=audio,
+                )
             )
-            if r.status_code == 200:
-                kiwi_data = r.json()
-                for stream_key in kiwi_data:
-                    if "Stream" in stream_key:
-                        for audio_key in ("sub", "dub"):
-                            if audio_key in kiwi_data[stream_key]:
-                                url_data = kiwi_data[stream_key][audio_key]
-                                server_code = (
-                                    url_data["url"]
-                                    if isinstance(url_data, dict)
-                                    else url_data
-                                )
-                                server_r = await self.http.get(
-                                    f"{self.base_url}/ajax/server",
-                                    params={"get": server_code},
-                                )
-                                if server_r.status_code == 200:
-                                    result_url = server_r.json().get("result", {}).get("url", "")
-                                    if result_url and "#" in result_url:
-                                        decoded = base64.b64decode(
-                                            result_url.split("#")[1]
-                                        ).decode("utf-8")
-                                        if decoded not in seen_urls:
-                                            seen_urls.add(decoded)
-                                            audio_type = (
-                                                AudioType.DUBBED
-                                                if audio_key == "dub"
-                                                else AudioType.SUBBED
-                                            )
-                                            variants.append(
-                                                VideoVariant(
-                                                    source_ref=json.dumps({
-                                                        "video_url": decoded,
-                                                        "quality": self.preferred_quality,
-                                                        "referer": "https://kwik.cx2.mewcdn.online",
-                                                    }),
-                                                    resolution=f"{self.preferred_quality}p",
-                                                    audio=audio_type,
-                                                )
-                                            )
+        return variants
+
+    async def _collect_mapper(self, data_mal, episode_ref, data_timestamp, add) -> None:
+        """Kiwi/mapper servers — usually soft-sub + dub HLS streams."""
+        try:
+            ep_no = self._ep_number_from_ref(episode_ref)
+            r = await self.http.get(
+                f"{MAPPER_API}{data_mal}/{ep_no}/{data_timestamp}",
+                headers={"referer": self.base_url, "origin": self.base_url},
+            )
+            if r.status_code != 200:
+                return
+            for stream_key, block in r.json().items():
+                if "Stream" not in stream_key or not isinstance(block, dict):
+                    continue
+                for audio_key in ("sub", "dub"):
+                    code = block.get(audio_key)
+                    code = code.get("url") if isinstance(code, dict) else code
+                    if not code:
+                        continue
+                    url = await self._resolve_server(code)
+                    add(audio_key, url, self.base_url)
         except Exception as exc:
             log.debug("kiwi.stream.failed", error=str(exc))
 
+    async def _collect_server_list(self, data_ids, add) -> None:
+        """Site server list — resolves each embed exactly like the website player.
+
+        Flow (verified against the live site):
+          ajax/server/list  -> per-type (sub / hsub / dub) data-link-id list
+          ajax/server?get=  -> embed URL (e.g. vidtube.site/stream/<tok>/<type>)
+          embed page        -> data-id + embed host
+          {host}/stream/getSources?id=<data-id> -> { sources.file = master.m3u8,
+                                                      tracks = [subtitles] }
+        The m3u8 MUST be fetched with ``referer: https://{host}/`` (host root);
+        any other referer is 403'd by the CDN.
+        """
         try:
             r = await self.http.get(
-                f"{self.base_url}/ajax/server/list",
-                params={"servers": data_ids},
+                f"{self.base_url}/ajax/server/list", params={"servers": data_ids}
             )
-            if r.status_code == 200:
-                soup = BeautifulSoup(r.json().get("result", ""), "html.parser")
-                servers = soup.find_all("div", class_="type")
-                for server in servers:
-                    server_type = server.get("data-type", "").upper()
-                    items = server.find_all("li")
-                    for li in items:
-                        link_id = li.get("data-link-id")
-                        if not link_id:
-                            continue
-                        srv_r = await self.http.get(
-                            f"{self.base_url}/ajax/server",
-                            params={"get": link_id},
-                        )
-                        if srv_r.status_code != 200:
-                            continue
-                        srv_url = srv_r.json().get("result", {}).get("url", "")
-                        if not srv_url:
-                            continue
-                        main_r = await self.http.get(
-                            srv_url,
-                            headers={"referer": f"{self.base_url}/"},
-                        )
-                        main_html = main_r.text
-
-                        id_match = re.search(r' data-id="(\d+)"', main_html)
-                        if id_match:
-                            mid = id_match.group(1)
-                            mp_r = await self.http.get(
-                                "https://megaplay.buzz/stream/getSources",
-                                params={"id": mid},
-                            )
-                            if mp_r.status_code == 200 and "sources" in mp_r.json():
-                                mp_data = mp_r.json()
-                                mp_url = mp_data.get("sources", {}).get("file", "")
-                                if mp_url and mp_url not in seen_urls:
-                                    seen_urls.add(mp_url)
-                                    audio_type = (
-                                        AudioType.DUBBED
-                                        if server_type.lower() == "dub"
-                                        else AudioType.SUBBED
-                                    )
-                                    variants.append(
-                                        VideoVariant(
-                                            source_ref=json.dumps({
-                                                "video_url": mp_url,
-                                                "quality": self.preferred_quality,
-                                                "referer": "https://megaplay.buzz/",
-                                            }),
-                                            resolution=f"{self.preferred_quality}p",
-                                            audio=audio_type,
-                                        )
-                                    )
-
-                        id_2_match = re.search(r' data-ep-id="(\d+)"', main_html)
-                        if id_2_match:
-                            id_2 = id_2_match.group(1)
-                            type_match = re.search(r"type: '(\w+)',", main_html)
-                            domain_match = re.search(r"domain2_url: '(.+)',", main_html)
-                            if type_match and domain_match:
-                                vtype = type_match.group(1)
-                                domain2 = domain_match.group(1)
-                                vs_r = await self.http.get(
-                                    f"{domain2}/save_data.php",
-                                    params={"id": f"{id_2}-{vtype}"},
-                                    headers={"referer": self.base_url},
-                                )
-                                if vs_r.status_code == 200:
-                                    vs_data = vs_r.json().get("data", {})
-                                    sources = vs_data.get("sources", [])
-                                    for src in sources:
-                                        src_url = src.get("url", "")
-                                        if src_url and src_url not in seen_urls:
-                                            seen_urls.add(src_url)
-                                            audio_type = (
-                                                AudioType.DUBBED
-                                                if server_type.lower() == "dub"
-                                                else AudioType.SUBBED
-                                            )
-                                            variants.append(
-                                                VideoVariant(
-                                                    source_ref=json.dumps({
-                                                        "video_url": src_url,
-                                                        "quality": self.preferred_quality,
-                                                        "referer": self.base_url,
-                                                    }),
-                                                    resolution=f"{self.preferred_quality}p",
-                                                    audio=audio_type,
-                                                )
-                                            )
+            if r.status_code != 200:
+                return
+            soup = BeautifulSoup(r.json().get("result", ""), "html.parser")
+            for server in soup.find_all("div", class_="type"):
+                # data-type is one of sub / hsub / dub
+                kind = server.get("data-type", "sub").lower()
+                for li in server.find_all("li"):
+                    link_id = li.get("data-link-id")
+                    if not link_id:
+                        continue
+                    embed_url = await self._resolve_server(link_id, decode=False)
+                    if not embed_url:
+                        continue
+                    await self._extract_embed(embed_url, kind, add)
         except Exception as exc:
             log.debug("server.list.failed", error=str(exc))
 
-        return variants
+    async def _extract_embed(self, embed_url: str, kind: str, add) -> None:
+        """Replicate the website player: fetch embed -> getSources -> m3u8 + subs."""
+        host = re.match(r"https?://([^/]+)", embed_url)
+        if not host:
+            return
+        host = host.group(1)
+        host_root = f"https://{host}/"
+        try:
+            main_html = (
+                await self.http.get(embed_url, headers={"referer": f"{self.base_url}/"})
+            ).text
+        except Exception:
+            return
+
+        # --- Primary: megaplay/vidtube-style data-id + {host}/stream/getSources ---
+        id_match = re.search(r'data-id=["\'](\w+)["\']', main_html)
+        if id_match:
+            try:
+                gs = await self.http.get(
+                    f"https://{host}/stream/getSources",
+                    params={"id": id_match.group(1)},
+                    headers={"referer": embed_url, "x-requested-with": "XMLHttpRequest"},
+                )
+                if gs.status_code == 200:
+                    data = gs.json()
+                    file_url = data.get("sources", {}).get("file", "")
+                    subs = [
+                        (t.get("label", t.get("kind", "")), t.get("file", ""))
+                        for t in data.get("tracks", [])
+                        if t.get("kind") == "captions" and t.get("file")
+                    ]
+                    # CDN requires the embed HOST ROOT as referer, not the full URL.
+                    add(kind, file_url, host_root, subs)
+                    if file_url:
+                        return
+            except Exception as exc:
+                log.debug("getsources.failed", host=host, error=str(exc))
+
+        # --- Fallback: legacy save_data.php embeds ---
+        id_2_match = re.search(r' data-ep-id="(\d+)"', main_html)
+        type_match = re.search(r"type: '(\w+)',", main_html)
+        domain_match = re.search(r"domain2_url: '(.+)',", main_html)
+        if id_2_match and type_match and domain_match:
+            domain2 = domain_match.group(1)
+            try:
+                vs_r = await self.http.get(
+                    f"{domain2}/save_data.php",
+                    params={"id": f"{id_2_match.group(1)}-{type_match.group(1)}"},
+                    headers={"referer": embed_url},
+                )
+                if vs_r.status_code == 200:
+                    for src in vs_r.json().get("data", {}).get("sources", []):
+                        add(kind, src.get("url", ""), host_root)
+            except Exception as exc:
+                log.debug("savedata.failed", error=str(exc))
+
+    async def _resolve_server(self, code: str, *, decode: bool = True) -> str:
+        """Resolve an ``ajax/server`` code to a playable URL (optionally b64-decoded)."""
+        try:
+            r = await self.http.get(f"{self.base_url}/ajax/server", params={"get": code})
+            if r.status_code != 200:
+                return ""
+            url = r.json().get("result", {}).get("url", "")
+            if decode and "#" in url:
+                return base64.b64decode(url.split("#")[1]).decode("utf-8")
+            return url
+        except Exception:
+            return ""
 
     def _ep_number_from_ref(self, episode_ref: str) -> str:
         parts = episode_ref.split("/")
@@ -413,102 +418,127 @@ class AnikotoSource(AnimeSource):
         resume_state: dict | None = None,
     ) -> dict:
         info = json.loads(variant.source_ref)
-        video_url = info["video_url"]
-        referer = info.get("referer", self.base_url)
-        quality = info.get("quality", variant.resolution)
+        quality = info.get("quality", variant.resolution).rstrip("p")
+
+        # New format carries an ordered candidate list; fall back to the legacy
+        # single-URL shape for compatibility.
+        candidates = info.get("candidates")
+        if not candidates:
+            candidates = [{
+                "video_url": info["video_url"],
+                "referer": info.get("referer", self.base_url),
+                "kind": "sub",
+            }]
 
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest = dest.with_suffix(".mp4")
-
         if on_progress:
             await on_progress(0, 1)
 
-        user_agent = (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/141.0.0.0 Safari/537.36"
-        )
-
-        if ".m3u8" in video_url or ".mpd" in video_url:
-            yt_cmd = [
-                sys.executable, "-m", "yt_dlp",
-                "--concurrent-fragments", "10",
-                "--referer", referer,
-                "--add-headers", f"Origin: {referer}",
-                "--add-headers", f"Referer: {referer}",
-                "--user-agent", user_agent,
-                "--retries", "10",
-                "--fragment-retries", "15",
-                "--fixup", "force",
-                "--output", str(dest),
-                video_url,
-            ]
-            if quality:
-                yt_cmd.insert(1, "--format-sort")
-                yt_cmd.insert(2, f"res:{quality}")
-
-            for attempt in range(3):
-                proc = await asyncio.create_subprocess_exec(
-                    *yt_cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                )
-                _, stderr = await proc.communicate()
-                if proc.returncode == 0:
-                    break
-                msg = stderr.decode(errors="replace")[-300:]
+        last_error = "no candidates"
+        for idx, cand in enumerate(candidates):
+            url = cand["video_url"]
+            referer = cand.get("referer", self.base_url)
+            try:
+                if ".m3u8" in url:
+                    out = await self._download_hls(url, referer, dest, quality, on_progress)
+                else:
+                    out = await self._download_direct(url, referer, dest, on_progress)
+            except Exception as exc:  # noqa: BLE001 - try the next server
+                last_error = str(exc)
                 log.warning(
-                    "yt-dlp attempt %d/3 failed (exit %d): %s",
-                    attempt + 1,
-                    proc.returncode,
-                    msg,
+                    "anikoto.candidate.failed",
+                    index=idx,
+                    kind=cand.get("kind"),
+                    error=last_error,
                 )
-                if attempt < 2:
-                    await asyncio.sleep(2 ** attempt)
-            else:
-                err = stderr.decode(errors="replace")[-500:]
-                raise RuntimeError(f"yt-dlp failed after 3 attempts for {video_url}: {err}")
-        else:
-            ffmpeg_headers = (
-                f"user-agent: {user_agent}\r\n"
-                f"referer: {referer}\r\n"
-                "accept: */*\r\n"
-            )
-            cmd = [
-                "ffmpeg",
-                "-headers", ffmpeg_headers,
-                "-i", video_url,
-                "-acodec", "copy",
-                "-vcodec", "copy",
-                "-loglevel", "error",
-                "-y",
-                str(dest),
-            ]
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                raise RuntimeError(
-                    f"ffmpeg failed (exit {proc.returncode}): "
-                    f"{stderr.decode(errors='replace')[:500]}"
-                )
+                continue
 
-        total_bytes = dest.stat().st_size
-        if on_progress:
-            await on_progress(total_bytes, total_bytes)
+            # Fetch subtitle tracks (host-root referer, same as the stream).
+            sub_info: list[dict] = []
+            sub_tracks: list[tuple[str, str, Path]] = []
+            hdrs = {"referer": referer, "origin": referer.rstrip("/")}
+            subs = cand.get("subtitles") or []
+            if subs:
+                pairs = [(s[0], s[1]) for s in subs if isinstance(s, (list, tuple)) and len(s) >= 2]
+                sub_info = await download_subtitles(self.http, pairs, hdrs, out)
+                for s in sub_info:
+                    if s.get("saved"):
+                        lang_m = re.search(r"\((\w[\w-]*)\)", s.get("label", ""))
+                        sub_tracks.append((
+                            s["label"], lang_m.group(1) if lang_m else "und", Path(s["saved"]),
+                        ))
 
-        import hashlib
-        sha = hashlib.sha256()
-        sha.update(dest.read_bytes())
+            # AniKoto streams carry embedded audio (Japanese for sub, English for
+            # dub); if ffmpeg is present, mux the (cleaned/branded) subtitles into
+            # a single MKV with that audio language tagged, else keep the .ts.
+            audio = "en" if cand.get("kind") == "dub" else "ja"
+            container = out.suffix.lstrip(".")
+            if find_ffmpeg() and sub_tracks:
+                try:
+                    name = "English" if audio == "en" else "Japanese"
+                    out, sub_info = await assemble_final(
+                        out, [], sub_tracks, dest, title=dest.stem,
+                        embedded_audio=(name, audio),
+                    )
+                    container = "mkv"
+                except Exception as exc:  # noqa: BLE001 - keep the playable .ts
+                    log.warning("anikoto.mux.failed", error=str(exc))
 
-        return {
-            "checksum": sha.hexdigest(),
-            "bytes": total_bytes,
-            "complete": True,
-        }
+            total_bytes = out.stat().st_size
+            if on_progress:
+                await on_progress(total_bytes, total_bytes)
+            sha = hashlib.sha256()
+            sha.update(out.read_bytes())
+            # AniKoto serves one audio per stream (Japanese for sub, English for
+            # dub), so the label is always single-audio SUBBED/DUBBED.
+            log.info("anikoto.download.ok", kind=cand.get("kind"), bytes=total_bytes)
+            return {
+                "checksum": sha.hexdigest(),
+                "bytes": total_bytes,
+                "complete": True,
+                "container": container,
+                "server_kind": cand.get("kind"),
+                "label": audio_label([audio]),
+                "subtitles": sub_info,
+            }
+
+        raise RuntimeError(f"all {len(candidates)} servers failed; last error: {last_error}")
+
+    async def _download_hls(
+        self,
+        master_url: str,
+        referer: str,
+        dest: Path,
+        quality: str,
+        on_progress: ProgressCallback | None,
+    ) -> Path:
+        """Download an HLS stream via the shared de-masking engine -> clean .ts
+        (remuxed to .mp4 if ffmpeg is present)."""
+        hdrs = {"referer": referer, "origin": referer.rstrip("/")}
+        ts_path = await download_hls_ts(
+            self.http, master_url, hdrs, quality, dest, on_progress
+        )
+        return maybe_remux(ts_path, dest)
+
+    async def _download_direct(
+        self, url: str, referer: str, dest: Path, on_progress: ProgressCallback | None
+    ) -> Path:
+        """Stream a plain progressive file (mp4 etc.) straight to disk."""
+        out = dest.with_suffix(Path(url.split("?")[0]).suffix or ".mp4")
+        hdrs = {"referer": referer, "origin": referer.rstrip("/")}
+        total = 0
+        async with self.http.stream("GET", url, headers=hdrs) as resp:
+            resp.raise_for_status()
+            expected = int(resp.headers.get("content-length", 0))
+            with out.open("wb") as fh:
+                async for chunk in resp.aiter_bytes(1 << 16):
+                    fh.write(chunk)
+                    total += len(chunk)
+                    if on_progress and expected:
+                        await on_progress(total, expected)
+        if total == 0:
+            raise RuntimeError("direct download produced an empty file")
+        return out
 
 
 def _fix_url(raw: str) -> str:
