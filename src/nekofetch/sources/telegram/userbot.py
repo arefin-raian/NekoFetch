@@ -1,0 +1,147 @@
+"""Userbot infrastructure — a pool of Telegram **user** sessions.
+
+Many actions we need (reading another bot's history, joining/requesting private
+channels, and future automation like creating/renaming bots) require a *user*
+account, not a bot account. This module manages a pool of user sessions: it
+selects whichever account is available and gracefully falls back to another if
+one cannot log in or hits a limitation (flood-wait, auth failure, ban).
+
+Initially one account is configured; the architecture takes an arbitrary list.
+
+NOTE: a user session must be created once interactively (phone + code, producing
+a ``session_string``); thereafter the pool starts non-interactively. Session
+creation is therefore an out-of-band setup step, not part of normal runtime.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from nekofetch.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from pyrogram import Client
+
+log = get_logger(__name__)
+
+T = TypeVar("T")
+
+
+@dataclass
+class Account:
+    """One user account. Prefer ``session_string`` (portable); a file session
+    under ``workdir`` also works once created."""
+    name: str
+    session_string: str | None = None
+    phone: str | None = None
+
+
+class UserbotPool:
+    """Holds user accounts and hands out a working, started client.
+
+    The pool is lazy: clients are only started on first use. The first account
+    that starts successfully becomes ``active``; failures roll over to the next.
+    """
+
+    def __init__(self, api_id: int, api_hash: str, accounts: list[Account],
+                 workdir: str = "sessions") -> None:
+        if not accounts:
+            raise ValueError("UserbotPool requires at least one account")
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.accounts = accounts
+        self.workdir = workdir
+        self._clients: dict[str, Client] = {}
+        self._active: Client | None = None
+        self._lock = asyncio.Lock()
+
+    @classmethod
+    def from_env(cls, api_id: int, api_hash: str, workdir: str = "sessions") -> UserbotPool:
+        """Load accounts from ``TELEGRAM_USERBOT_ACCOUNTS`` (JSON list of
+        ``{"name","session_string"}``) or single ``TELEGRAM_USERBOT_SESSION``."""
+        raw = os.getenv("TELEGRAM_USERBOT_ACCOUNTS")
+        accounts: list[Account] = []
+        if raw:
+            for entry in json.loads(raw):
+                accounts.append(Account(name=entry["name"],
+                                        session_string=entry.get("session_string"),
+                                        phone=entry.get("phone")))
+        elif os.getenv("TELEGRAM_USERBOT_SESSION"):
+            accounts.append(Account(name="primary",
+                                    session_string=os.getenv("TELEGRAM_USERBOT_SESSION")))
+        else:
+            accounts.append(Account(name="primary"))  # file session in workdir
+        return cls(api_id, api_hash, accounts, workdir)
+
+    def _build(self, acc: Account) -> Client:
+        from pyrogram import Client
+        kwargs: dict[str, Any] = {
+            "api_id": self.api_id, "api_hash": self.api_hash, "workdir": self.workdir,
+        }
+        if acc.session_string:
+            kwargs["session_string"] = acc.session_string
+        if acc.phone:
+            kwargs["phone_number"] = acc.phone
+        return Client(acc.name, **kwargs)
+
+    async def acquire(self) -> Client:
+        """Return a started client, trying each account until one works."""
+        async with self._lock:
+            if self._active is not None and self._active.is_connected:
+                return self._active
+            errors: list[str] = []
+            for acc in self.accounts:
+                client = self._clients.get(acc.name) or self._build(acc)
+                self._clients[acc.name] = client
+                try:
+                    if not client.is_connected:
+                        await client.start()
+                    me = await client.get_me()
+                    log.info("userbot.active", account=acc.name, user_id=me.id)
+                    self._active = client
+                    return client
+                except Exception as exc:  # noqa: BLE001 - try the next account
+                    errors.append(f"{acc.name}: {exc}")
+                    log.warning("userbot.account.failed", account=acc.name, error=str(exc))
+            raise RuntimeError(f"no usable userbot account: {errors}")
+
+    async def execute(self, fn: Callable[[Client], Awaitable[T]], *, retries: int = 1) -> T:
+        """Run ``fn`` with a working client; on failure, fall back to another
+        account and retry (handles flood-wait / session death mid-operation)."""
+        last: Exception | None = None
+        for _ in range(len(self.accounts) * max(1, retries)):
+            client = await self.acquire()
+            try:
+                return await fn(client)
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                log.warning("userbot.execute.failed", error=str(exc))
+                # drop the active client so acquire() rolls to the next account
+                await self._retire(client)
+        raise RuntimeError(f"userbot.execute exhausted all accounts: {last}")
+
+    async def _retire(self, client: Client) -> None:
+        if self._active is client:
+            self._active = None
+        for name, c in list(self._clients.items()):
+            if c is client:
+                try:
+                    await c.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._clients.pop(name, None)
+
+    async def close(self) -> None:
+        for c in self._clients.values():
+            try:
+                if c.is_connected:
+                    await c.stop()
+            except Exception:  # noqa: BLE001
+                pass
+        self._clients.clear()
+        self._active = None

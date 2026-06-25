@@ -1,0 +1,147 @@
+# NekoFetch — Telegram Userbot Source Report
+
+**Date:** 2026-06-25
+**Modules:** `src/nekofetch/sources/telegram/` — `userbot.py`, `anilist.py`,
+`matching.py`, `animefair.py`, `packs.py`, `source.py`
+**Runtime:** pyrofork (pyrogram 2.3.69), user session (not a bot account)
+
+A Telegram-channel source, preferred over streaming/torrent sources when the
+requested anime exists in the AnimeFair index.
+
+> **Validation scope.** The Anilist metadata, flexible matching, index parsing,
+> channel-link normalization, and pack-structure discovery are **live/unit
+> tested**. The parts that require an authenticated **user session** (logging in,
+> messaging @AnimeFair_Index_Bot, joining channels, downloading media) are built
+> against the verified pyrofork API but **cannot be executed here** — a user
+> session must be created once interactively (phone + code → `session_string`).
+> Those paths are coded to the real API and ready for a session.
+
+---
+
+## 1. Userbot infrastructure (`userbot.py`)
+
+A **pool of user accounts** with automatic selection + graceful fallback:
+
+- `UserbotPool(api_id, api_hash, accounts)` / `from_env(...)` — one account today
+  (`TELEGRAM_USERBOT_SESSION`), arbitrarily many via `TELEGRAM_USERBOT_ACCOUNTS`
+  (JSON list of `{name, session_string}`).
+- `acquire()` starts the first account that logs in successfully; failures
+  (auth/flood/ban) roll to the next.
+- `execute(fn, retries=…)` runs an operation on a working client and **falls back
+  to another account** if it dies mid-operation (flood-wait, session death).
+- Same pool is the **control layer for future automation** (creating/renaming
+  bots, setting commands) — actions a bot account can't perform.
+
+Verified: pyrofork `Client` supports `session_string`, `join_chat`,
+`get_chat_history`, `download_media`; the pool imports and constructs lazily
+(no connection until first use).
+
+---
+
+## 2. Anilist metadata + flexible matching (`anilist.py`, `matching.py`) — LIVE TESTED
+
+**Matching is never exact-string.** A title reduces to its set of meaningful word
+tokens (camelCase split, every separator normalized, quality/format noise &
+stopwords dropped). All separator variants match:
+
+`Attack on Titan` ≡ `Attack-on-Titan` ≡ `AttackOnTitan` ≡ `Attack_On_Titan` ≡
+`Attack on Titan S01 1080p Dual Audio` → **match**; `Demon Slayer` → **no match**.
+
+**Anilist** expands one query into every title we might see on Telegram. Live
+results:
+
+| Query | Titles | Synonyms | Relations | Variants |
+|---|---|---|---|---|
+| Attack on Titan | Shingeki no Kyojin / Attack on Titan / 進撃の巨人 | SnK, AoT, … | 11 (2 sequels/prequels, 3 movies) | **47** |
+| Frieren | Sousou no Frieren / Beyond Journey's End / 葬送の… | Frieren at the Funeral, … | 6 | 32 |
+| Kaguya-sama | …wa Kokurasetai / Love is War / かぐや様… | … | 2 | 19 |
+
+Payoff: a channel that names the show **"Shingeki no Kyojin S2"** still matches a
+**"Attack on Titan"** query via the variant set — verified.
+
+---
+
+## 3. AnimeFair index + channel entry (`animefair.py`)
+
+- **`lookup(title)`** — messages @AnimeFair_Index_Bot with the Anilist-expanded
+  names, reads the reply, and extracts `(anime → channel)` entries from **both
+  inline-keyboard buttons and message text**. Verified on synthetic replies of
+  both shapes.
+- **Channel-link normalization** (verified): `@user`, `t.me/user`,
+  `t.me/+hash`, `t.me/joinchat/hash` → canonical ref + an `is_invite` flag.
+- **`find_channel(title)`** — picks the entry whose name best matches the query
+  variants (separator-proof, ≥0.6/0.8 thresholds).
+- **`enter_channel(entry)`** — `join_chat`; on a private channel it catches
+  `InviteRequestSent` and reports **`pending`** ("retry after approval"); already
+  a member → `joined`; public resolvable → `public`. `is_member()` re-checks
+  after approval. (pyrogram error classes confirmed present.)
+
+---
+
+## 4. Pack-structure discovery (`packs.py`) — UNIT TESTED
+
+Builds a generalized catalog from a channel's media messages (filename **and**
+caption), reusing the release-name heuristics. Verified on a mixed synthetic
+channel:
+
+```
+seasons: { 1: {episodes:2, resolutions:[480p,720p,1080p], range:[1,2]},
+           2: {episodes:2, resolutions:[1080p],          range:[1,2]} }
+movies: 1   specials: 2   packs: 1   unresolved: 1
+```
+
+- **Resolution variants** grouped per episode (S1 EP1 → 480p/720p/1080p).
+- **Multi-season** split (`S02E01` ≠ season 1).
+- **Season packs** (`[Batch]`, `.zip`, `01-25`) detected as `pack`.
+- **Movies / specials / OVAs** classified and set aside.
+- **Ambiguous** items (e.g. a stray thumbnail) go to `unresolved` for
+  **escalation to channel maintainers** rather than being mis-filed.
+
+---
+
+## 5. TelegramSource + priority (`source.py`)
+
+Implements the `AnimeSource` interface, registered in the source registry:
+
+- `search(query)` → returns a stub **only if the index has the anime**; otherwise
+  empty, so the orchestrator falls back to Nyaa / KickAssAnime / AniKoto.
+- `get_episodes` → enters the channel, scans up to `history_limit` media messages,
+  runs discovery, and exposes seasons → EP1..EPN + movies/specials.
+- `get_variants` → one variant per resolution (highest first).
+- `download` → fetches the chosen message's media via the user session.
+
+**Priority:** placing `telegram` first in the orchestrator's source list makes it
+preferred whenever a release exists there; its empty `search` result on a miss is
+the graceful hand-off to the other sources (the §`download_with_fallback`
+mechanism).
+
+---
+
+## 6. Edge cases, limitations & next steps
+
+- **Live session required** for the Telegram-dependent paths (login, index query,
+  channel join, media download). Create a `session_string` once interactively,
+  set `TELEGRAM_USERBOT_SESSION`, then those paths run unmodified.
+- **Private channels with approval** surface as `pending`; a scheduler should
+  re-check `is_member()` and resume once approved.
+- **Unknown index reply format**: parsing covers buttons + text/links; if a future
+  format differs, `lookup` degrades to "no entries" (safe fallback) and should be
+  extended after observing a real reply.
+- **Pack archives (.zip season packs)**: detected and catalogued, but extracting
+  individual episodes from an archive is a follow-up (download + unpack).
+- **Escalation hook**: `Catalog.unresolved` is the designated place to ask channel
+  admins/maintainers for clarification on un-parseable items.
+- The discovery heuristics are **general/pattern-based**; broadening them is best
+  done by observing many real channels with a live session.
+
+---
+
+## 7. Bottom line
+
+Userbot pool (multi-account, fallback) + Anilist-enriched separator-proof matching
++ AnimeFair index parsing + automatic channel entry (with private-channel request
+handling) + generalized pack discovery (seasons/resolutions/movies/specials,
+multi-season) + a registered `TelegramSource` preferred over other sources. The
+metadata, matching, parsing, and discovery layers are tested now; the
+session-bound Telegram I/O is coded to the verified pyrofork API and ready to run
+once a user session is provisioned.
