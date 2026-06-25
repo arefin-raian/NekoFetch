@@ -117,6 +117,35 @@ mechanism).
 
 ---
 
+## 5b. Release normalization (`_normalize.py`) — TESTED
+
+Every downloaded file is normalized so all user-facing metadata is our branding,
+language info preserved where reliable. Verified on a real 9-subtitle / 2-audio MKV:
+
+- **Captions/title replaced** → container title `Anime Weebs #1 - @AniXWeebs`,
+  source metadata stripped (`-map_metadata -1`).
+- **All embedded text subtitles extracted** (ASS/SRT/VTT/mov_text → VTT), image
+  subs (PGS/VOBSUB) skipped and reported.
+- **Each subtitle processed** with the shared pipeline (watermark strip + our
+  styling + branding in the longest gap, last-3-min excluded) → only **our**
+  `.ass` tracks are re-muxed; originals dropped.
+- **Language detection** (tag first, else content analysis by script + function
+  words): verified en/ja/hi/es. 
+- **Naming policy** applied to subtitle **and** audio track titles + metadata:
+  | Case | Title |
+  |---|---|
+  | known sub/audio language | `English - @AniXWeebs`, `Japanese - @AniXWeebs`, `Hindi - @AniXWeebs` |
+  | subtitle language unknown | `@AniXWeebs` |
+  | audio language unknown | `Anime Weebs #1 - @AniXWeebs` |
+
+Real output (Demon Slayer test): audio `Japanese - @AniXWeebs` / `English -
+@AniXWeebs`; 9 subs relabeled `French / Arabic / English / Spanish / … -
+@AniXWeebs` with correct ISO language codes. `normalize_release()` is
+source-agnostic — wired into TelegramSource and available to apply to any
+source's output for fleet-wide consistency.
+
+---
+
 ## 6. Edge cases, limitations & next steps
 
 - **Live session required** for the Telegram-dependent paths (login, index query,

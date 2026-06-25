@@ -194,8 +194,23 @@ class TelegramSource(AnimeSource):
         size = path.stat().st_size if path.exists() else 0
         if size == 0:
             raise RuntimeError("telegram download produced no file")
-        import hashlib
-        sha = hashlib.sha256()
-        sha.update(path.read_bytes())
-        return {"path": str(path), "name": path.name, "bytes": size,
-                "checksum": sha.hexdigest(), "complete": True}
+
+        # Normalize: our caption/title, extracted+branded subtitles, @AniXWeebs
+        # track labels — exactly as every other source's output is standardized.
+        result: dict = {"raw_path": str(path), "name": path.name, "bytes": size,
+                        "complete": True}
+        try:
+            from nekofetch.sources._normalize import find_ffmpeg, normalize_release
+            if find_ffmpeg():
+                norm = await normalize_release(path, dest.with_name(dest.stem))
+                path.unlink(missing_ok=True)
+                result.update(path=norm["path"], name=Path(norm["path"]).name,
+                              bytes=norm["bytes"], normalized=norm)
+            else:
+                result["path"] = str(path)
+                result["warnings"] = ["ffmpeg missing — delivered without normalization"]
+        except Exception as exc:  # noqa: BLE001 - keep the raw download on failure
+            log.warning("telegram.normalize.failed", error=str(exc))
+            result["path"] = str(path)
+            result["warnings"] = [f"normalization failed: {exc}"]
+        return result
