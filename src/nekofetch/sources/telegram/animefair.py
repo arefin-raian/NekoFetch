@@ -15,7 +15,11 @@ from dataclasses import dataclass
 
 from nekofetch.core.logging import get_logger
 from nekofetch.sources.telegram.anilist import AnilistClient
-from nekofetch.sources.telegram.matching import normalize_words, title_matches
+from nekofetch.sources.telegram.matching import (
+    meaningful_variants,
+    normalize_words,
+    title_matches,
+)
 from nekofetch.sources.telegram.userbot import UserbotPool
 
 log = get_logger(__name__)
@@ -66,29 +70,30 @@ class AnimeFairIndex:
 
     # ---- index query -------------------------------------------------------
 
-    async def _ask_bot(self, text: str, *, wait: float = 4.0) -> list:
-        """Send ``text`` to the index bot and return its reply message(s)."""
-        async def run(client):
-            from pyrogram.enums import ChatType  # noqa: F401  (ensures pyrogram present)
-            sent = await client.send_message(INDEX_BOT, text)
-            # Poll for a bot reply newer than what we sent.
-            for _ in range(int(wait / 0.5)):
-                await asyncio.sleep(0.5)
-                replies = []
-                async for msg in client.get_chat_history(INDEX_BOT, limit=5):
-                    if msg.id > sent.id and not msg.outgoing:
-                        replies.append(msg)
-                if replies:
-                    return list(reversed(replies))
-            return []
-        return await self.pool.execute(run)
-
     @staticmethod
     def _entries_from_message(msg) -> list[IndexEntry]:
-        """Extract (name → channel) entries from buttons and text of one message."""
-        entries: list[IndexEntry] = []
+        """Extract (name → channel) entries from one index message.
 
-        # 1) inline keyboard buttons: text = anime name, url/username = channel
+        AnimeFair's index is plain text with the channel links carried as
+        TEXT_LINK **entities** on each anime name (📌 Name → t.me/...). We read
+        the entities first, then fall back to inline buttons and bare links/usernames
+        for other index formats.
+        """
+        entries: list[IndexEntry] = []
+        text = msg.text or msg.caption or ""
+        entities = getattr(msg, "entities", None) or getattr(msg, "caption_entities", None) or []
+
+        # 1) TEXT_LINK / TEXT_MENTION entities — the AnimeFair shape.
+        for e in entities:
+            etype = getattr(e.type, "name", str(e.type))
+            url = getattr(e, "url", None)
+            if etype == "TEXT_LINK" and url and ("t.me/" in url or url.startswith("@")):
+                name = text[e.offset:e.offset + e.length].strip(" 📌\n\t")
+                if name:
+                    ch, inv = _normalize_channel(url)
+                    entries.append(IndexEntry(name=name, channel=ch, is_invite=inv, raw=url))
+
+        # 2) inline keyboard buttons: text = anime name, url/username = channel
         markup = getattr(msg, "reply_markup", None)
         rows = getattr(markup, "inline_keyboard", None) or []
         for row in rows:
@@ -99,63 +104,68 @@ class AnimeFairIndex:
                     entries.append(IndexEntry(name=btn.text or "", channel=ch,
                                               is_invite=inv, raw=url))
 
-        # 2) text links (entities) + inline @usernames / t.me links per line
-        text = msg.text or msg.caption or ""
-        for line in text.splitlines():
-            m = _TME.search(line) or _USERNAME.search(line)
-            if not m:
-                continue
-            ch, inv = _normalize_channel(m.group(0))
-            # name = the line with the link stripped out
-            name = re.sub(_TME, "", line)
-            name = re.sub(_USERNAME, "", name)
-            name = re.sub(r"[\-–—:|•·]+", " ", name).strip(" \t-–—:|") or ch
-            entries.append(IndexEntry(name=name, channel=ch, is_invite=inv, raw=line))
+        # 3) bare links / @usernames in plain text (other index formats)
+        if not entries:
+            for line in text.splitlines():
+                m = _TME.search(line) or _USERNAME.search(line)
+                if not m:
+                    continue
+                ch, inv = _normalize_channel(m.group(0))
+                name = re.sub(_TME, "", line)
+                name = re.sub(_USERNAME, "", name)
+                name = re.sub(r"[\-–—:|•·📌]+", " ", name).strip(" \t-–—:|") or ch
+                entries.append(IndexEntry(name=name, channel=ch, is_invite=inv, raw=line))
         return entries
 
-    async def lookup(self, title: str) -> list[IndexEntry]:
-        """Query the index for ``title`` (Anilist-expanded) and return entries."""
-        variants = await self.anilist.title_variants(title)
-        # Query the bot with the most canonical names first.
-        seen_ch: set[str] = set()
-        found: list[IndexEntry] = []
-        for q in variants[:4]:
-            try:
-                messages = await self._ask_bot(q)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("animefair.ask.failed", query=q, error=str(exc))
-                continue
-            for msg in messages:
+    async def _fetch_index(self) -> list[IndexEntry]:
+        """Trigger /start and read the full multi-part index from the bot's chat.
+
+        AnimeFair is menu-driven (it rejects free-text search), so we pull the
+        whole index once and match locally against it.
+        """
+        async def run(client) -> list[IndexEntry]:
+            await client.send_message(INDEX_BOT, "/start")
+            await asyncio.sleep(4.0)
+            entries: list[IndexEntry] = []
+            seen: set[str] = set()
+            async for msg in client.get_chat_history(INDEX_BOT, limit=20):
+                if getattr(msg, "outgoing", False):
+                    continue
                 for e in self._entries_from_message(msg):
-                    if e.channel not in seen_ch:
-                        seen_ch.add(e.channel)
-                        found.append(e)
-            if found:
-                break
-        return found
+                    key = f"{e.name.lower()}|{e.channel}"
+                    if key not in seen:
+                        seen.add(key)
+                        entries.append(e)
+            return entries
+        return await self.pool.execute(run)
+
+    async def lookup(self, title: str) -> list[IndexEntry]:
+        """Return index entries whose name matches ``title`` (Anilist-expanded)."""
+        variants = meaningful_variants(await self.anilist.title_variants(title))
+        index = await self._fetch_index()
+        matches: list[IndexEntry] = []
+        for e in index:
+            if any(title_matches(v, e.name, threshold=0.85) for v in variants if v):
+                matches.append(e)
+        return matches
 
     async def find_channel(self, title: str) -> IndexEntry | None:
         """Best index entry whose name matches ``title`` via Anilist variants."""
-        variants = await self.anilist.title_variants(title)
+        variants = meaningful_variants(await self.anilist.title_variants(title))
         entries = await self.lookup(title)
         if not entries:
             return None
-        # Prefer entries whose name contains all meaningful words of any variant.
-        scored: list[tuple[float, IndexEntry]] = []
+        scored: list[tuple[float, int, IndexEntry]] = []
         for e in entries:
             score = max(
                 (len(normalize_words(v) & normalize_words(e.name)) / max(1, len(normalize_words(v)))
                  for v in variants if normalize_words(v)),
                 default=0.0,
             )
-            scored.append((score, e))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        best_score, best = scored[0]
-        if best_score >= 0.6 or any(
-            title_matches(v, best.name, threshold=0.8) for v in variants
-        ):
-            return best
-        return None
+            scored.append((score, len(normalize_words(e.name)), e))
+        # highest score, then the most specific (shortest) name
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        return scored[0][2]
 
     # ---- channel entry -----------------------------------------------------
 

@@ -87,3 +87,18 @@ def best_match(query: str, candidates: list[str], *, threshold: float = 0.85):
 def any_title_matches(queries: list[str], candidate: str, *, threshold: float = 0.9) -> bool:
     """True if the candidate matches ANY of the query titles (e.g. Anilist set)."""
     return any(title_matches(q, candidate, threshold=threshold) for q in queries if q)
+
+
+def meaningful_variants(variants: list[str]) -> list[str]:
+    """Drop acronym/too-short variants that cause false matches.
+
+    Acronyms like "AoT" / "SnK" normalize to a single short token (e.g. {"ao"})
+    and collide with unrelated titles ("Ao Ashi"). Keep only variants with ≥2
+    meaningful words, or a single word of ≥5 characters.
+    """
+    out = []
+    for v in variants:
+        words = normalize_words(v)
+        if len(words) >= 2 or (len(words) == 1 and len(next(iter(words))) >= 5):
+            out.append(v)
+    return out or variants

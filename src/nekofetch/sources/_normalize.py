@@ -170,6 +170,7 @@ async def normalize_release(src: Path, dest: Path) -> dict:
     work = dest.parent
     work.mkdir(parents=True, exist_ok=True)
     tmp: list[Path] = []
+    seen_sigs: set[str] = set()   # dedup identical subtitle tracks
     report: dict = {"audio": [], "subtitles": [], "skipped": []}
 
     # ---- extract + process each text subtitle ----
@@ -196,6 +197,12 @@ async def normalize_release(src: Path, dest: Path) -> dict:
         meta = process_subtitle(vtt, video_ms)
         ass = Path(meta["ass"])
         tmp.append(ass)
+        sig = meta.get("signature")
+        if sig and sig in seen_sigs:
+            report["skipped"].append({"index": s["index"], "reason": "duplicate track"})
+            continue
+        if sig:
+            seen_sigs.add(sig)
         title = track_title(lang, is_audio=False)
         processed.append((ass, title, lang))
         report["subtitles"].append({"lang": lang, "title": title,

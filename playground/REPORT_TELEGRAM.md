@@ -8,13 +8,33 @@
 A Telegram-channel source, preferred over streaming/torrent sources when the
 requested anime exists in the AnimeFair index.
 
-> **Validation scope.** The Anilist metadata, flexible matching, index parsing,
-> channel-link normalization, and pack-structure discovery are **live/unit
-> tested**. The parts that require an authenticated **user session** (logging in,
-> messaging @AnimeFair_Index_Bot, joining channels, downloading media) are built
-> against the verified pyrofork API but **cannot be executed here** — a user
-> session must be created once interactively (phone + code → `session_string`).
-> Those paths are coded to the real API and ready for a session.
+> **LIVE-VALIDATED (session provisioned).** A user session was provisioned and
+> the **entire pipeline was run end to end against the real bot/channels**:
+> login → fetch index (146 anime) → Anilist match → join channel → discover packs
+> → download a file → normalize. Findings from that live run are folded in below.
+
+### Live run — what the real data revealed
+
+- **The index bot is menu-driven, not search.** Free-text queries return
+  "Unknown Command". `/start` returns a sticker + **multi-part text messages**
+  ("Index of Anime Fair (1)/(2)/(3)") where each anime name is a **TEXT_LINK
+  entity** → `t.me/<channel>` (public username *or* `t.me/+invite` for private).
+  Fix applied: parser now reads **entities**, and `lookup` pulls the **whole
+  index once** and matches locally (146 anime parsed live).
+- **Acronym matching bug found & fixed.** "Attack on Titan" wrongly matched
+  "Ao Ashi" because the Anilist synonym **"AoT"** camel-split to `{ao}` and
+  collided. Added `meaningful_variants()` to drop acronym/too-short variants.
+  Post-fix: AoT/JJK/Demon Slayer/Death Note/One Piece all resolve correctly;
+  un-indexed titles (Bocchi) return nothing → clean fallback.
+- **Real channel layout** (live): files are **documents** named
+  `Ao Ashi - S1 E01 [Dual] 1080p @Anime_Fair.mkv`, posted per resolution
+  (1080p, then 720p, then 480p), with a header text and promo photo/"how to
+  watch" video as noise. Discovery handled it: **24 episodes × {1080p,720p,480p}
+  dual-audio**, noise → `unresolved`.
+- **Download + normalize, live**: Ao Ashi S1E01 480p (45 MB) downloaded via the
+  user session and normalized → container `Anime Weebs #1 - @AniXWeebs`, audio
+  `English - @AniXWeebs` / `Japanese - @AniXWeebs`, subs `English - @AniXWeebs`
+  (identical tracks deduped).
 
 ---
 
