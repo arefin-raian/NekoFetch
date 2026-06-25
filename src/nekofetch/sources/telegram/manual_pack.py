@@ -26,6 +26,7 @@ from nekofetch.sources._normalize import (
     normalize_release,
     probe_audio_config,
 )
+from nekofetch.sources._torrent import validate_order
 
 log = get_logger(__name__)
 
@@ -82,6 +83,14 @@ async def process_pack(
     out.mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240 - one-time setup
     episodes: list[dict] = []
 
+    # Secondary validation: the admin-provided order is primary, but cross-check
+    # it against the filename pattern. A mismatch / ambiguity is flagged so the
+    # admin can confirm rather than us silently mislabeling.
+    order_check = validate_order([Path(f).name for f in ordered_files])
+    if order_check["needs_admin_confirmation"]:
+        log.warning("manual.order.confirm", detail=order_check["detail"],
+                    confidence=order_check["confidence"])
+
     for i, src in enumerate(ordered_files):
         ep = start_episode + i
         src_path = Path(src)
@@ -131,7 +140,8 @@ async def process_pack(
 
     ok = sum(1 for e in episodes if e.get("path") and "error" not in e)
     return {"anime": anime, "season": season, "quality": quality,
-            "total": len(ordered_files), "processed": ok, "episodes": episodes}
+            "total": len(ordered_files), "processed": ok,
+            "order_validation": order_check, "episodes": episodes}
 
 
 async def _upload(pool, chat, path: Path, caption: str, on_progress: ProgressCb) -> bool:

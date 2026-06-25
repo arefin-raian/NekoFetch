@@ -210,6 +210,21 @@ provides the anime name, a quality, and a **pre-ordered** pack (file #1 = Ep 1).
 Verified end to end on a real MKV: standard filename, `container = "Tokyo Ghoul -
 S01E01"`, audio/sub tracks all `… - @AniXWeebs`.
 
+**Episode-order tracking (primary + secondary).** Download/provided order is the
+primary safeguard. As a secondary validation, `_torrent.analyze_pack()` diffs the
+pack's filenames — within one release group the format is stable, so it finds the
+constant template and the single varying numeric segment = the episode number
+(e.g. `Group S1 E{EP} [Dual] 1080p`). `validate_order()` then checks the detected
+numbers increase in step with the given order; a mismatch or ambiguity (mixed
+formats, non-contiguous numbers, multiple varying numeric columns) sets
+`needs_admin_confirmation` so the admin confirms instead of us mislabeling.
+Verified: clean groups → 0.95 confidence, no prompt; scrambled order → flagged.
+
+**Audio config tag.** Auto-detected from the real audio streams (3+ = Multi,
+2 = Dual, 1 Japanese = Sub, 1 English/other = Dub; single-unknown flagged), admin-
+overridable, and surfaced in the filename, caption, and container title
+(`… [Dual] @AniXWeebs`).
+
 ---
 
 ## 6. Edge cases, limitations & next steps

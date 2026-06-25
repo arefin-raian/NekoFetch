@@ -9,6 +9,7 @@ movies / specials / OVAs.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 VIDEO_EXT = (".mkv", ".mp4", ".avi", ".ts", ".m4v", ".mov")
 
@@ -133,6 +134,101 @@ def parse_release_meta(name: str) -> dict:
 
 def _natural_key(s: str):
     return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", s)]
+
+
+# --------------------------------------------------------------------------- #
+# pack pattern analysis (secondary validation of episode order)
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class PackAnalysis:
+    """Result of differencing a pack's filenames to find the episode segment."""
+    episode_numbers: list[int | None]   # per input file, in the given order
+    confidence: float                   # 0..1
+    ambiguous: bool                     # True → ask admin to confirm
+    template: str                       # constant filename template with {EP}
+    detail: str
+
+
+def analyze_pack(names: list[str]) -> PackAnalysis:
+    """Find the single varying segment across a pack's filenames = episode number.
+
+    Within one release group the name format is stable; only the episode number
+    (and maybe a title) changes. We tokenize each name into alternating
+    text/number chunks, align them, and pick the numeric column that varies as a
+    near-contiguous increasing sequence. Falls back to per-file parsing when the
+    structure isn't uniform. Confidence is low (→ ``ambiguous``) when several
+    numeric columns vary or the detected numbers don't form a clean run.
+    """
+    if not names:
+        return PackAnalysis([], 0.0, True, "", "empty pack")
+
+    bases = [_EXT_RE.sub("", n) for n in names]
+    toks = [re.findall(r"\d+|\D+", b) for b in bases]   # alternating chunks
+
+    # Aligned analysis only when every name has the same chunk layout.
+    if len(names) >= 2 and len({len(t) for t in toks}) == 1:
+        width = len(toks[0])
+        candidates: list[tuple[int, list[int]]] = []
+        for j in range(width):
+            col = [t[j] for t in toks]
+            if all(c.isdigit() for c in col) and len({*col}) > 1:
+                candidates.append((j, [int(c) for c in col]))
+        scored = []
+        for j, vals in candidates:
+            uniq = len(set(vals)) == len(vals)
+            srt = sorted(vals)
+            contiguous = srt == list(range(srt[0], srt[0] + len(srt)))
+            scored.append(((uniq, contiguous, len(set(vals))), j, vals))
+        if scored:
+            scored.sort(reverse=True)
+            (uniq, contiguous, _n), j, vals = scored[0]
+            multi = len(candidates) > 1
+            if uniq and contiguous:
+                conf = 0.95 if not multi else 0.8
+            elif uniq:
+                conf = 0.6
+            else:
+                conf = 0.35
+            template = "".join("{EP}" if k == j else toks[0][k] for k in range(width))
+            return PackAnalysis(
+                episode_numbers=vals, confidence=conf,
+                ambiguous=conf < 0.75,
+                template=template,
+                detail=f"aligned column {j}; {len(candidates)} varying numeric column(s)",
+            )
+
+    # Fallback: parse each filename independently.
+    eps = [parse_release_meta(n)["episode"] for n in names]
+    known = [e for e in eps if e is not None]
+    uniq = len(set(known)) == len(known)
+    conf = 0.6 if (len(known) == len(names) and uniq) else 0.3
+    return PackAnalysis(eps, conf, conf < 0.75, "", "per-file parse fallback")
+
+
+def validate_order(names: list[str]) -> dict:
+    """Check whether the given file order matches the detected episode numbers.
+
+    ``names`` are assumed to already be in intended episode order (index 0 = first
+    episode). Returns the analysis plus whether the detected numbers increase in
+    step with that order (``order_consistent``) and whether to confirm with admin.
+    """
+    pa = analyze_pack(names)
+    nums = pa.episode_numbers
+    have = [n for n in nums if n is not None]
+    # consistent if the detected episode numbers strictly increase with position
+    order_consistent = len(have) >= 2 and all(
+        a < b for a, b in zip(have, have[1:], strict=False)
+    )
+    confirm = pa.ambiguous or not order_consistent or len(have) < len(names)
+    return {
+        "episode_numbers": nums,
+        "confidence": round(pa.confidence, 2),
+        "order_consistent": order_consistent,
+        "needs_admin_confirmation": confirm,
+        "template": pa.template,
+        "detail": pa.detail,
+    }
 
 
 def order_episodes(files: list[dict]) -> list[dict]:
