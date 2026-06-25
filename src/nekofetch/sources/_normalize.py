@@ -291,8 +291,10 @@ async def normalize_release(src: Path, dest: Path, *, title: str | None = None,
         config, certain = detect_audio_config([lang for _t, lang in audio_plan])
     report["audio_config"] = config
     report["audio_config_certain"] = certain
-    # surface the config in the container title (and thus metadata)
-    container_title = f"{base_title} [{config}]" if config not in base_title else base_title
+    # container title carries the release name, the audio config, and our brand,
+    # e.g. "Tokyo Ghoul - S01E01 [Dual] @AniXWeebs"
+    core = base_title if config in base_title else f"{base_title} [{config}]"
+    container_title = core if BRAND_HANDLE in core else f"{core} {BRAND_HANDLE}"
 
     # ---- remux: video + relabeled audio + ONLY our subs ----
     out = dest.with_suffix(".mkv")
