@@ -44,7 +44,19 @@ async def main() -> None:
 
     from pyrogram import Client
 
-    name = input("Account label (e.g. primary): ").strip() or "primary"
+    print("=" * 64)
+    print(" NekoFetch — Telegram userbot login")
+    print("=" * 64)
+    print(" You'll be asked for, in order:")
+    print("   1. An account label (just press Enter for 'primary')")
+    print("   2. Your phone number WITH country code, e.g. +8801XXXXXXXXX")
+    print("   3. Confirm the number (type y)")
+    print("   4. The login code Telegram sends to your app")
+    print("   5. Your 2-step-verification password (only if you set one)")
+    print(" Nothing is shown to anyone else; the session is saved to .env.")
+    print("=" * 64)
+    name = input("\n1) Account label [primary]: ").strip() or "primary"
+    print("   (next, Pyrogram will ask for your phone number + code)\n")
     async with Client(name, api_id=api_id, api_hash=api_hash, in_memory=True) as app:
         session = await app.export_session_string()
         me = await app.get_me()
