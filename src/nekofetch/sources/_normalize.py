@@ -30,8 +30,6 @@ from nekofetch.sources._subs import _TAG_RE, process_subtitle
 log = get_logger(__name__)
 
 BRAND_HANDLE = "@AniXWeebs"
-AUDIO_UNKNOWN_TITLE = f"Anime Weebs #1 - {BRAND_HANDLE}"
-CONTAINER_TITLE = f"Anime Weebs #1 - {BRAND_HANDLE}"
 
 # Subtitle codecs we can convert to text/VTT (image-based subs are skipped).
 _TEXT_SUB_CODECS = {"ass", "ssa", "subrip", "srt", "webvtt", "mov_text", "text"}
@@ -125,10 +123,33 @@ def detect_language(text: str) -> str | None:
     return "en" if len(words) > 30 else None
 
 
-def track_title(lang: str | None, *, is_audio: bool) -> str:
+def track_title(lang: str | None, ordinal: int) -> str:
+    """Title for an audio/subtitle track.
+
+    Known language → "<Language> - @AniXWeebs". Unknown → "Anime Weebs #N -
+    @AniXWeebs" where N is the 1-based ordinal of this track *within its own
+    stream type* (first audio = #1, second audio = #2; subtitles numbered
+    separately). The "#N" is a stream index, nothing to do with the container.
+    """
     if lang and lang in _LANG_NAME:
         return f"{_LANG_NAME[lang]} - {BRAND_HANDLE}"
-    return AUDIO_UNKNOWN_TITLE if is_audio else BRAND_HANDLE
+    return f"Anime Weebs #{ordinal} - {BRAND_HANDLE}"
+
+
+# Noise to strip when deriving a clean release title for the container.
+_TITLE_NOISE = re.compile(
+    r"(\[[^\]]*\]|\([^)]*\)|@\w+|\b\d{3,4}p\b|\b(?:dual|sub|subbed|dub|dubbed|"
+    r"multi|x26[45]|hevc|av1|10bit|web|webrip|bluray|bd)\b|\.(mkv|mp4|avi))",
+    re.IGNORECASE,
+)
+
+
+def release_title(name: str) -> str:
+    """Derive a clean, human release title from a filename for the container's
+    ``title`` tag (the container is the MKV wrapper, NOT a media stream)."""
+    s = _TITLE_NOISE.sub(" ", name)
+    s = re.sub(r"[\s._-]+", " ", s).strip(" -–—:|")
+    return s or "Anime Weebs"
 
 
 def _ffprobe_streams(path: Path) -> list[dict]:
@@ -156,11 +177,19 @@ def _duration_ms(path: Path) -> int | None:
         return None
 
 
-async def normalize_release(src: Path, dest: Path) -> dict:
-    """Normalize ``src`` into ``dest`` (.mkv) with our metadata + processed subs."""
+async def normalize_release(src: Path, dest: Path, *, title: str | None = None) -> dict:
+    """Normalize ``src`` into ``dest`` (.mkv) with our metadata + processed subs.
+
+    ``title`` sets the container's title tag (the MKV wrapper itself — not a
+    stream); if omitted it is derived from the source filename.
+    """
     ffmpeg, ffprobe = find_ffmpeg(), find_ffprobe()
     if not (ffmpeg and ffprobe):
         raise RuntimeError("ffmpeg/ffprobe required for normalization")
+
+    # Capture the container title up front — the loops below reuse the name
+    # ``title`` for per-track titles, so resolve the parameter before then.
+    container_title = title or release_title(src.name)
 
     streams = _ffprobe_streams(src)
     video_ms = _duration_ms(src)
@@ -203,16 +232,17 @@ async def normalize_release(src: Path, dest: Path) -> dict:
             continue
         if sig:
             seen_sigs.add(sig)
-        title = track_title(lang, is_audio=False)
+        # ordinal = this track's 1-based position among the kept subtitle streams
+        title = track_title(lang, len(processed) + 1)
         processed.append((ass, title, lang))
         report["subtitles"].append({"lang": lang, "title": title,
                                      "from_tag": bool(tag_lang)})
 
-    # ---- audio relabel plan ----
+    # ---- audio relabel plan (ordinal = position among audio streams) ----
     audio_plan: list[tuple[str, str | None]] = []
-    for s in audio:
+    for i, s in enumerate(audio):
         lang = _norm_lang(s.get("tags", {}).get("language"))
-        title = track_title(lang, is_audio=True)
+        title = track_title(lang, i + 1)
         audio_plan.append((title, lang))
         report["audio"].append({"lang": lang, "title": title})
 
@@ -226,7 +256,7 @@ async def normalize_release(src: Path, dest: Path) -> dict:
     for i in range(len(processed)):
         cmd += ["-map", f"{i + 1}:0"]
     cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "copy",
-            "-map_metadata", "-1", "-metadata", f"title={CONTAINER_TITLE}"]
+            "-map_metadata", "-1", "-metadata", f"title={container_title}"]
     for i, (title, lang) in enumerate(audio_plan):
         cmd += [f"-metadata:s:a:{i}", f"title={title}"]
         if lang:

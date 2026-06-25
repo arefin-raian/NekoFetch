@@ -94,29 +94,33 @@ def parse_release_meta(name: str) -> dict:
     elif re.search(r"\bmovie\b", low):
         kind = "movie"
 
-    # season
+    # season — try the most explicit forms first; default 1 if only episodes given
     season = 1
-    ms = (re.search(r"\bs(\d{1,2})\s*e\d", low)
-          or re.search(r"\bseason\s*(\d{1,2})\b", low)
-          or re.search(r"\bs(\d{1,2})\b", low))
+    ms = (re.search(r"\bs(\d{1,2})\s*e\s*\d", low)        # S1E1 / S01 E01 / S1 E 1
+          or re.search(r"\bseason\s*(\d{1,2})\b", low)     # Season 1
+          or re.search(r"\bs(\d{1,2})\b", low))            # S2
     if ms:
         season = int(ms.group(1))
 
-    # episode number — SxxExx first, then common batch separators
+    # episode number — ordered most-specific → least, stop at first hit.
+    # Anchored on the STABLE 'E<num>' / 'episode <num>' / separator-number forms
+    # rather than any audio/quality keyword (Dual/Sub/Multi vary, these don't).
     episode = None
-    me = re.search(r"s\d{1,2}\s*e(\d{1,3})", low)
-    if me:
-        episode = int(me.group(1))
-    else:
-        for pat in (r"-\s*(\d{1,3})(?:v\d)?\s*[\(\[]",   # "- 01 (1080p)"
-                    r"\bep(?:isode)?\s*(\d{1,3})\b",      # "EP01" / "Episode 1"
-                    r"\s(\d{1,3})\s*[\(\[]",              # " 01 ["
-                    r"-\s*(\d{1,3})(?:v\d)?\b",           # "- 12"
-                    r"#(\d{1,3})\b"):                     # "#01"
-            m = re.search(pat, low)
-            if m:
-                episode = int(m.group(1))
-                break
+    for pat in (
+        r"\bs\d{1,2}\s*e\s*(\d{1,3})\b",                  # S1 E12 / S01E01 / S1 E 12
+        r"\bseason\s*\d{1,2}\s*episode\s*(\d{1,3})\b",    # Season 1 Episode 1
+        r"\bepisode\s*(\d{1,3})\b",                       # Episode 12
+        r"\bep\s*[._-]?\s*(\d{1,3})\b",                   # EP01 / Ep.1
+        r"(?:^|[\s\-_])e(\d{1,3})\b",                     # - E17 / E17 / _E001
+        r"-\s*(\d{1,3})(?:v\d)?\s*[\(\[]",                # - 24 [Dual]
+        r"-\s*(\d{1,3})(?:v\d)?(?=\s|$)",                 # - 24
+        r"\s(\d{1,3})\s*[\(\[]",                          #  24 (1080p)
+        r"#(\d{1,3})\b",                                  # #01
+    ):
+        m = re.search(pat, low)
+        if m:
+            episode = int(m.group(1))
+            break
 
     res = None
     mr = _RES_RE.search(low)

@@ -166,6 +166,52 @@ source's output for fleet-wide consistency.
 
 ---
 
+## 5c. Channel survey + flexible parsing (537 real filenames)
+
+Swept **18 channels** from the live index and collected **537 real filenames** to
+derive patterns from data, not samples. Findings:
+
+- Audio tag varies — **Dual (429), Sub (91), Multi (16)** — so nothing keys off
+  "Dual"; ordering anchors on the stable `E<num>` / separator forms.
+- Season/episode forms in the wild: `S1 E13`, `S01E01`, `Season 2 Episode 5`,
+  `E001`/`E01`, `E17 (04)` (alt numbering), and **plain `- 24`** with no markers,
+  in both `Title - S1 E1` and `S1 E1 - Title` orders.
+- After widening the shared parser (`_torrent.parse_release_meta`): **episode
+  detection 523→535/535 = 100%** on the corpus; OVA/special/movie still classified.
+
+## 5d. Metadata semantics — corrected
+
+Two concepts were wrong and are now fixed:
+
+- **Stream ordinal `#N`.** Unknown-language tracks are labelled
+  `Anime Weebs #N - @AniXWeebs` where **N is the track's 1-based position within
+  its stream type** (1st audio = #1, 2nd audio = #2; subtitles numbered
+  separately) — not a constant `#1`.
+- **Container title is not a track.** The MKV container is the wrapper (video +
+  audio + subs + chapters + attachments + metadata); its `title` tag is now the
+  **release name** (e.g. "Tokyo Ghoul - S01E01"), derived/cleaned from the file
+  or supplied explicitly. (Fixed a variable-shadowing bug that had been writing a
+  track's title onto the container.)
+
+## 5e. Manual Telegram fallback (`manual_pack.py`)
+
+AnimeFair is the **primary automated** source; **Telegram is the primary manual
+fallback**, and other sources remain available. For non-AnimeFair titles an admin
+provides the anime name, a quality, and a **pre-ordered** pack (file #1 = Ep 1).
+`process_pack()` then, per file in the given order:
+
+1. assigns the episode number from position (no order-detection needed),
+2. renames to our standard `‹Anime› S01E01 [1080p] @AniXWeebs.mkv`,
+3. runs the shared normalization (metadata + extracted/cleaned/branded subs,
+   `#N` track labels, release container title),
+4. applies our caption (`🎬 ‹Anime› / 📺 Season•Episode•Quality / @AniXWeebs`),
+5. optionally **uploads** each finished file to a target chat via the userbot.
+
+Verified end to end on a real MKV: standard filename, `container = "Tokyo Ghoul -
+S01E01"`, audio/sub tracks all `… - @AniXWeebs`.
+
+---
+
 ## 6. Edge cases, limitations & next steps
 
 - **Live session required** for the Telegram-dependent paths (login, index query,
