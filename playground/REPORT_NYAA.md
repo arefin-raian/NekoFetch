@@ -134,6 +134,27 @@ Bocchi EP1 (1080p HEVC, 7.6 MB/min → not oversized): produced **720p (152 MB) 
 
 ---
 
+## 6b. Multi-source fallback (general downloader rule)
+
+`orchestrator.download_with_fallback(sources, query, dest)` makes reliability a
+whole-downloader property, not per-source:
+
+1. Try the **preferred source** first.
+2. Within it, try the **top N candidate releases** (Nyaa) / search results, and
+   for each episode try **every variant/server** before giving up.
+3. On no-result, **timeout** (per-source budget), or download failure, move to
+   the **next source** entirely.
+4. Fail only when **every** source is exhausted — returning the full `attempts`
+   trail for diagnostics.
+
+This means a title like *Attack on Titan* that stalls or has a bad top release on
+one source automatically continues through other releases and then other sources
+(KickAssAnime, AniKoto, Nyaa) until a valid release downloads. Verified with mock
+sources: search-failure fallthrough, all-candidates-fail → next source, and
+full-exhaustion error all behave correctly.
+
+---
+
 ## 7. Bottom line
 
 A complete torrent-based source: nyaa RSS search with **Dual Audio priority +
