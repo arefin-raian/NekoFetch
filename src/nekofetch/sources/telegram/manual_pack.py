@@ -21,7 +21,11 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from nekofetch.core.logging import get_logger
-from nekofetch.sources._normalize import BRAND_HANDLE, normalize_release
+from nekofetch.sources._normalize import (
+    BRAND_HANDLE,
+    normalize_release,
+    probe_audio_config,
+)
 
 log = get_logger(__name__)
 
@@ -33,17 +37,22 @@ def _safe(s: str) -> str:
     return "".join(c for c in s if c not in '<>:"/\\|?*').strip()
 
 
-def standard_stem(anime: str, season: int, episode: int, quality: str) -> str:
-    """Our canonical filename stem, e.g. 'Tokyo Ghoul S01E01 [1080p] @AniXWeebs'."""
-    q = quality if quality.endswith("p") or not quality[:1].isdigit() else f"{quality}p"
-    return f"{_safe(anime)} S{season:02d}E{episode:02d} [{q}] {BRAND_HANDLE}"
+def _q(quality: str) -> str:
+    return quality if quality.endswith("p") or not quality[:1].isdigit() else f"{quality}p"
 
 
-def our_caption(anime: str, season: int, episode: int, quality: str) -> str:
+def standard_stem(anime: str, season: int, episode: int, quality: str,
+                  audio_config: str) -> str:
+    """Canonical stem, e.g. 'Tokyo Ghoul S01E01 [Dual] [1080p] @AniXWeebs'."""
+    return (f"{_safe(anime)} S{season:02d}E{episode:02d} "
+            f"[{audio_config}] [{_q(quality)}] {BRAND_HANDLE}")
+
+
+def our_caption(anime: str, season: int, episode: int, quality: str,
+                audio_config: str) -> str:
     """Our standard delivery caption (replaces any original caption)."""
-    q = quality if quality.endswith("p") or not quality[:1].isdigit() else f"{quality}p"
     return (f"🎬 {anime}\n"
-            f"📺 Season {season} • Episode {episode:02d} • {q}\n\n"
+            f"📺 Season {season} • Episode {episode:02d} • {_q(quality)} • {audio_config}\n\n"
             f"⚡ Brought to you by {BRAND_HANDLE}")
 
 
@@ -55,6 +64,7 @@ async def process_pack(
     *,
     season: int = 1,
     start_episode: int = 1,
+    audio_config: str | None = None,
     pool=None,
     upload_to: int | str | None = None,
     on_progress: ProgressCb = None,
@@ -62,6 +72,9 @@ async def process_pack(
     """Process one quality's ordered pack into finished, branded releases.
 
     ``ordered_files`` MUST already be in episode order (index 0 → start_episode).
+    ``audio_config`` (Dual/Multi/Sub/Dub) overrides per-file auto-detection — pass
+    it when the admin specifies the config; otherwise it's detected from each
+    file's audio streams and any uncertain detection is flagged for confirmation.
     Returns a manifest of every processed episode. If ``pool`` and ``upload_to``
     are given, each finished file is uploaded with our caption.
     """
@@ -79,10 +92,20 @@ async def process_pack(
             episodes.append(rec)
             continue
 
-        stem = standard_stem(anime, season, ep, quality)
+        # Audio config: admin override, else detect from the file's streams.
+        if audio_config:
+            config, certain = audio_config, True
+        else:
+            config, certain = probe_audio_config(src_path)
+        rec["audio_config"] = config
+        if not certain:
+            rec["audio_config_uncertain"] = True   # admin should confirm/override
+
+        stem = standard_stem(anime, season, ep, quality, config)
         title = f"{anime} - S{season:02d}E{ep:02d}"
         try:
-            norm = await normalize_release(src_path, out / stem, title=title)
+            norm = await normalize_release(src_path, out / stem, title=title,
+                                           audio_config=config)
             final = Path(norm["path"])
             rec.update(path=str(final), name=final.name, bytes=norm["bytes"],
                        audio=norm["audio"], subtitles=norm["subtitles"])
@@ -96,7 +119,7 @@ async def process_pack(
             try:
                 rec["uploaded"] = await _upload(
                     pool, upload_to, final,
-                    our_caption(anime, season, ep, quality), on_progress,
+                    our_caption(anime, season, ep, quality, config), on_progress,
                 )
             except Exception as exc:  # noqa: BLE001
                 rec["upload_error"] = str(exc)

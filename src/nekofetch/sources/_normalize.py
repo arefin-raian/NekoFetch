@@ -123,6 +123,31 @@ def detect_language(text: str) -> str | None:
     return "en" if len(words) > 30 else None
 
 
+def detect_audio_config(langs: list[str | None]) -> tuple[str, bool]:
+    """Derive the release audio config from the audio streams actually present.
+
+    Returns ``(config, certain)``:
+      * 3+ audio tracks            -> "Multi"  (certain)
+      * 2 audio tracks             -> "Dual"   (certain)
+      * 1 Japanese track           -> "Sub"    (certain)
+      * 1 English/other-known track-> "Dub"    (certain)
+      * 1 unknown / 0 tracks       -> "Sub"    (uncertain → caller should confirm)
+    """
+    n = len(langs)
+    if n >= 3:
+        return "Multi", True
+    if n == 2:
+        return "Dual", True
+    if n == 1:
+        lang = langs[0]
+        if lang == "ja":
+            return "Sub", True
+        if lang:                      # English or any other identified dub
+            return "Dub", True
+        return "Sub", False           # single track, language unknown
+    return "Sub", False               # no audio detected
+
+
 def track_title(lang: str | None, ordinal: int) -> str:
     """Title for an audio/subtitle track.
 
@@ -164,6 +189,16 @@ def _ffprobe_streams(path: Path) -> list[dict]:
         return []
 
 
+def probe_audio_config(path: Path) -> tuple[str, bool]:
+    """ffprobe ``path`` and return its (audio_config, certain) — Dual/Multi/Sub/Dub.
+
+    Lets a caller put the right tag in the filename before normalizing.
+    """
+    langs = [_norm_lang(s.get("tags", {}).get("language"))
+             for s in _ffprobe_streams(path) if s.get("codec_type") == "audio"]
+    return detect_audio_config(langs)
+
+
 def _duration_ms(path: Path) -> int | None:
     ffprobe = find_ffprobe()
     r = subprocess.run(
@@ -177,11 +212,14 @@ def _duration_ms(path: Path) -> int | None:
         return None
 
 
-async def normalize_release(src: Path, dest: Path, *, title: str | None = None) -> dict:
+async def normalize_release(src: Path, dest: Path, *, title: str | None = None,
+                            audio_config: str | None = None) -> dict:
     """Normalize ``src`` into ``dest`` (.mkv) with our metadata + processed subs.
 
     ``title`` sets the container's title tag (the MKV wrapper itself — not a
-    stream); if omitted it is derived from the source filename.
+    stream); if omitted it is derived from the source filename. ``audio_config``
+    (Dual/Multi/Sub/Dub) overrides auto-detection; otherwise it is detected from
+    the audio streams and the report flags ``audio_config_certain``.
     """
     ffmpeg, ffprobe = find_ffmpeg(), find_ffprobe()
     if not (ffmpeg and ffprobe):
@@ -189,7 +227,7 @@ async def normalize_release(src: Path, dest: Path, *, title: str | None = None) 
 
     # Capture the container title up front — the loops below reuse the name
     # ``title`` for per-track titles, so resolve the parameter before then.
-    container_title = title or release_title(src.name)
+    base_title = title or release_title(src.name)
 
     streams = _ffprobe_streams(src)
     video_ms = _duration_ms(src)
@@ -242,9 +280,19 @@ async def normalize_release(src: Path, dest: Path, *, title: str | None = None) 
     audio_plan: list[tuple[str, str | None]] = []
     for i, s in enumerate(audio):
         lang = _norm_lang(s.get("tags", {}).get("language"))
-        title = track_title(lang, i + 1)
-        audio_plan.append((title, lang))
-        report["audio"].append({"lang": lang, "title": title})
+        track = track_title(lang, i + 1)
+        audio_plan.append((track, lang))
+        report["audio"].append({"lang": lang, "title": track})
+
+    # audio config: explicit override wins, else detect from the streams.
+    if audio_config:
+        config, certain = audio_config, True
+    else:
+        config, certain = detect_audio_config([lang for _t, lang in audio_plan])
+    report["audio_config"] = config
+    report["audio_config_certain"] = certain
+    # surface the config in the container title (and thus metadata)
+    container_title = f"{base_title} [{config}]" if config not in base_title else base_title
 
     # ---- remux: video + relabeled audio + ONLY our subs ----
     out = dest.with_suffix(".mkv")
