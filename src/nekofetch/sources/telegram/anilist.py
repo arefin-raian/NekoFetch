@@ -12,14 +12,32 @@ from dataclasses import dataclass, field
 import httpx
 
 from nekofetch.core.logging import get_logger
+from nekofetch.sources.telegram.matching import title_matches
 
 log = get_logger(__name__)
 
 ANILIST_URL = "https://graphql.anilist.co"
 
-_SEARCH_QUERY = """
+# Candidate search — AniList's SEARCH_MATCH can rank an obscure short above the
+# real show (e.g. "Demon Slayer" → a TV_SHORT with a matching synonym), so we
+# fetch several and pick by title-match then popularity ourselves.
+_PAGE_QUERY = """
 query ($search: String) {
-  Media(search: $search, type: ANIME) {
+  Page(perPage: 10) {
+    media(search: $search, type: ANIME, sort: SEARCH_MATCH) {
+      id
+      popularity
+      format
+      title { romaji english native }
+      synonyms
+    }
+  }
+}
+"""
+
+_MEDIA_BY_ID = """
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
     id
     format
     season
@@ -88,15 +106,44 @@ class AnilistClient:
             await self._http.aclose()
             self._http = None
 
-    async def search(self, query: str) -> AnilistMedia | None:
+    async def _best_id(self, query: str) -> int | None:
+        """Pick the best candidate id: title-match first, popularity as tiebreak."""
         try:
             resp = await self.http.post(
-                ANILIST_URL, json={"query": _SEARCH_QUERY, "variables": {"search": query}}
+                ANILIST_URL, json={"query": _PAGE_QUERY, "variables": {"search": query}}
+            )
+            resp.raise_for_status()
+            media = resp.json().get("data", {}).get("Page", {}).get("media", [])
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("anilist.search.failed", query=query, error=str(exc))
+            return None
+        if not media:
+            return None
+
+        def all_titles(m: dict) -> list[str]:
+            t = m.get("title", {})
+            return [x for x in (t.get("romaji"), t.get("english"), t.get("native"))
+                    if x] + list(m.get("synonyms") or [])
+
+        def matches(m: dict) -> bool:
+            return any(title_matches(query, t, threshold=0.85) for t in all_titles(m))
+
+        ranked = [m for m in media if matches(m)] or media
+        ranked.sort(key=lambda m: m.get("popularity") or 0, reverse=True)
+        return ranked[0]["id"]
+
+    async def search(self, query: str) -> AnilistMedia | None:
+        media_id = await self._best_id(query)
+        if media_id is None:
+            return None
+        try:
+            resp = await self.http.post(
+                ANILIST_URL, json={"query": _MEDIA_BY_ID, "variables": {"id": media_id}}
             )
             resp.raise_for_status()
             media = resp.json().get("data", {}).get("Media")
         except (httpx.HTTPError, ValueError) as exc:
-            log.warning("anilist.search.failed", query=query, error=str(exc))
+            log.warning("anilist.fetch.failed", id=media_id, error=str(exc))
             return None
         if not media:
             return None
