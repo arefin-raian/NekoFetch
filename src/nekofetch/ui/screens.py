@@ -1,12 +1,9 @@
 """v2 user-facing screens — artwork + HTML caption + keyboard per surface.
 
-Pure builders (no Telegram I/O) so they're unit-testable and the handlers stay
-declarative. Follows the approved redesign: HTML parse mode, bold-first emphasis,
-colon-separated fields, no code styling for ordinary text, a 16:9 artwork on
-every major surface (chosen with no back-to-back repeats), and inline buttons.
-
-Each builder returns a ``Screen``; the caller sends/edits it as a photo message
-(caption = ``Screen.caption``, parse_mode=HTML, photo=``Screen.image``).
+Pure builders (no Telegram I/O), unit-testable, handlers stay declarative. Every
+visible string comes from the centralized catalog (``localization.messages``) —
+no raw text here. HTML parse mode, bold-first emphasis, colon-separated fields,
+no code styling, a 16:9 artwork (no back-to-back repeats) on every major surface.
 """
 
 from __future__ import annotations
@@ -17,11 +14,19 @@ from pathlib import Path
 
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
+from nekofetch.localization.messages import PARSE_MODE, M, t
 from nekofetch.ui.artwork import pick_artwork
 from nekofetch.ui.components import cb
 
 # ── status glyphs (lifecycle / lists) ──
 DONE, CURRENT, PENDING = "●", "➤", "◌"
+
+# Lifecycle order; labels resolve from the catalog at render time.
+_LIFECYCLE_KEYS = [
+    M.LC_REQUESTED, M.LC_PENDING, M.LC_SOURCE_ASSIGNED, M.LC_DOWNLOADING,
+    M.LC_PROCESSING_META, M.LC_EXTRACTING_SUBS, M.LC_WATERMARK,
+    M.LC_UPLOADING, M.LC_PUBLISHED, M.LC_COMPLETED,
+]
 
 
 @dataclass(slots=True)
@@ -29,11 +34,10 @@ class Screen:
     caption: str
     image: Path | None = None
     keyboard: InlineKeyboardMarkup | None = None
-    parse_mode: str = "HTML"
+    parse_mode: str = PARSE_MODE
 
 
 def _esc(text: str) -> str:
-    """Escape user/3rd-party text for HTML parse mode."""
     return html.escape(text or "", quote=False)
 
 
@@ -44,179 +48,156 @@ def _kb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     )
 
 
-def _field(label: str, value: str) -> str:
-    """Clean ``Label : value`` row — bold label, plain value, no boxes."""
-    return f"<b>{_esc(label)}</b> : {_esc(value)}"
+def _field(key: str, value: str) -> str:
+    """Clean ``Label : value`` row — bold label (from catalog), plain value."""
+    return f"<b>{t(key)}</b> : {_esc(value)}"
+
+
+def lifecycle_labels() -> list[str]:
+    return [t(k) for k in _LIFECYCLE_KEYS]
 
 
 # ── User screens ───────────────────────────────────────────────────────────
 
 def welcome(user_name: str) -> Screen:
     name = _esc(user_name) or "there"
-    caption = (
-        f"🐾  <b>Hi {name} — welcome to NekoFetch.</b>\n\n"
-        "I fetch anime for you. Ask for any title and I'll source it, clean it "
-        "up, brand it, and deliver it — <b>subs, dual audio, the works</b>.\n\n"
-        "<i>Already in our library?</i> You get it instantly.\n"
-        "<i>Not yet?</i> I'll go get it.\n\n"
-        "What would you like to do?"
-    )
-    kb = _kb([[("🔎 Request Anime", cb("req_new")),
-               ("📥 My Requests", cb("my_reqs"))]])
+    caption = "\n\n".join([
+        t(M.WELCOME_TITLE, name=name),
+        t(M.WELCOME_BODY),
+        t(M.WELCOME_LIBRARY),
+    ])
+    kb = _kb([[(t(M.BTN_REQUEST_ANIME), cb("req_new")),
+               (t(M.BTN_MY_REQUESTS), cb("my_reqs"))]])
     return Screen(caption=caption, image=pick_artwork(), keyboard=kb)
 
 
 def my_requests(user_name: str, requests: list[dict]) -> Screen:
-    """`requests`: dicts with ``title`` and ``status`` (a short status label)."""
     name = _esc(user_name) or "you"
-    lines = [f"📥  <b>{name} — your requests</b>", ""]
+    lines = [t(M.MYREQ_TITLE, name=name), ""]
     if not requests:
-        lines.append("<i>No requests yet. Tap “Request Anime” to start.</i>")
+        lines.append(t(M.MYREQ_EMPTY))
     else:
         width = min(28, max((len(r["title"]) for r in requests), default=0))
         for r in requests:
-            title = _esc(r["title"])[:28]
-            lines.append(f"{title.ljust(width)} :  {_esc(r['status'])}")
+            lines.append(t(M.MYREQ_ROW, title=_esc(r["title"])[:28].ljust(width),
+                           status=_esc(r["status"])))
         ready = sum(1 for r in requests if "ready" in r["status"].lower())
         prog = sum(1 for r in requests if any(
             k in r["status"].lower() for k in ("process", "queue", "download", "upload")))
         wait = sum(1 for r in requests if "need" in r["status"].lower())
-        lines += ["", f"<i>{len(requests)} total · {ready} ready · "
-                      f"{prog} in progress · {wait} waiting on you</i>"]
-    kb = _kb([[("🔎 Request Anime", cb("req_new"))], [("⬅ Back", cb("home"))]])
+        lines += ["", t(M.MYREQ_SUMMARY, total=len(requests), ready=ready,
+                        progress=prog, waiting=wait)]
+    kb = _kb([[(t(M.BTN_REQUEST_ANIME), cb("req_new"))],
+              [(t(M.BTN_BACK), cb("home"))]])
     return Screen(caption="\n".join(lines), image=pick_artwork(), keyboard=kb)
 
 
 def ask_title() -> Screen:
-    caption = (
-        "🔎  <b>Which anime?</b>\n\n"
-        "Send me a name — English, Japanese, or a short form.\n"
-        "<i>Examples : Attack on Titan · Shingeki no Kyojin · AoT</i>"
-    )
-    return Screen(caption=caption, image=pick_artwork(),
-                  keyboard=_kb([[("⬅ Back", cb("home"))]]))
+    return Screen(caption=t(M.ASK_TITLE), image=pick_artwork(),
+                  keyboard=_kb([[(t(M.BTN_BACK), cb("home"))]]))
 
 
 def searching(query: str, frame: str = "⠹") -> Screen:
-    """Transient animated state (caller cycles ``frame``)."""
-    return Screen(caption=f"🔎  Looking up <b>{_esc(query)}</b> {frame}", image=None)
+    return Screen(caption=t(M.SEARCHING, query=_esc(query), frame=frame), image=None)
 
 
 def confirm_series(info: dict, image: Path | None = None) -> Screen:
-    """TMDB-backed single-series confirmation card. ``info`` = TmdbResult-like dict."""
-    rows = [f"🎬  <b>{_esc(info['title'])}</b>"
-            + (f"  <i>({_esc(str(info['year']))})</i>" if info.get("year") else ""), ""]
+    header = t(M.CONFIRM_HEADER, title=_esc(info["title"]))
+    if info.get("year"):
+        header += f"  <i>({_esc(str(info['year']))})</i>"
+    rows = [header, ""]
     if info.get("media_type"):
-        rows.append(_field("Type", "TV Series" if info["media_type"] == "tv" else "Movie"))
+        rows.append(_field(M.F_TYPE,
+                    t(M.VALUE_TV) if info["media_type"] == "tv" else t(M.VALUE_MOVIE)))
     if info.get("seasons") or info.get("episodes"):
-        seasons = info.get("seasons")
-        episodes = info.get("episodes")
         bits = []
-        if seasons:
-            bits.append(f"{seasons} season{'s' if seasons != 1 else ''}")
-        if episodes:
-            bits.append(f"{episodes} episodes")
-        rows.append(_field("Content", " · ".join(bits)))
+        if info.get("seasons"):
+            bits.append(f"{info['seasons']} season{'s' if info['seasons'] != 1 else ''}")
+        if info.get("episodes"):
+            bits.append(f"{info['episodes']} episodes")
+        rows.append(_field(M.F_CONTENT, t(M.SEP_DOT).join(bits)))
     if info.get("genres"):
-        rows.append(_field("Genres", " · ".join(info["genres"][:4])))
+        rows.append(_field(M.F_GENRES, t(M.SEP_DOT).join(info["genres"][:4])))
     if info.get("rating"):
-        rows.append(_field("Rating", str(info["rating"])))
+        rows.append(_field(M.F_RATING, str(info["rating"])))
     if info.get("overview"):
         ov = _esc(info["overview"])
         ov = ov[:300].rsplit(" ", 1)[0] + "…" if len(ov) > 300 else ov
         rows += ["", f"<blockquote expandable>{ov}</blockquote>"]
-    rows += ["", "<b>Is this the one?</b>"]
-    kb = _kb([[("✅ Yes, that's it", cb("series_yes", info.get("id", ""))),
-               ("❌ Not this", cb("series_no"))]])
+    rows += ["", t(M.CONFIRM_QUESTION)]
+    kb = _kb([[(t(M.BTN_SERIES_YES), cb("series_yes", info.get("id", ""))),
+               (t(M.BTN_SERIES_NO), cb("series_no"))]])
     return Screen(caption="\n".join(rows), image=image or pick_artwork(), keyboard=kb)
 
 
 def choose_version(query: str, versions: list[dict]) -> Screen:
-    """Distinct-version chooser (Hellsing vs Ultimate, Naruto vs Shippuuden)."""
-    rows = [f"🔎  <b>“{_esc(query)}” comes in distinct versions. Which one?</b>", ""]
+    rows = [t(M.VERSION_HEADER, query=_esc(query)), ""]
     width = min(24, max((len(v["title"]) for v in versions), default=0))
     for v in versions:
-        meta = " · ".join(str(x) for x in (v.get("format"), v.get("year"),
-                          f"{v['episodes']} eps" if v.get("episodes") else None) if x)
+        meta = t(M.SEP_DOT).join(str(x) for x in (
+            v.get("format"), v.get("year"),
+            f"{v['episodes']} eps" if v.get("episodes") else None) if x)
         rows.append(f"{_esc(v['title'])[:24].ljust(width)} :  <i>{_esc(meta)}</i>")
     btns = [[(v["title"][:32], cb("ver_pick", v.get("id", i)))]
             for i, v in enumerate(versions)]
-    btns.append([("❌ Neither", cb("series_no"))])
+    btns.append([(t(M.BTN_VERSION_NEITHER), cb("series_no"))])
     return Screen(caption="\n".join(rows), image=pick_artwork(), keyboard=_kb(btns))
 
 
 def retry_title() -> Screen:
-    caption = (
-        "🔎  <b>My bad — let's try again.</b>\n\n"
-        "Give me the title a bit more precisely (add the year or the Japanese "
-        "name if you can)."
-    )
-    return Screen(caption=caption, image=pick_artwork(),
-                  keyboard=_kb([[("⬅ Back", cb("home"))]]))
+    return Screen(caption=t(M.RETRY_TITLE), image=pick_artwork(),
+                  keyboard=_kb([[(t(M.BTN_BACK), cb("home"))]]))
 
 
 def request_received(user_name: str, title: str, queue_pos: int | None = None) -> Screen:
-    name = _esc(user_name) or "there"
-    rows = [f"📥  <b>Got it, {name}.</b>", "",
-            _field("Anime", title),
-            _field("Status", "⏳ Queued for sourcing")]
+    rows = [t(M.REQ_RECEIVED, name=_esc(user_name) or "there"), "",
+            _field(M.F_ANIME, title),
+            _field(M.F_STATUS, t(M.VALUE_QUEUED))]
     if queue_pos is not None:
-        rows.append(_field("Queue", f"#{queue_pos}"))
-    rows += ["", "<i>I'll fetch → process → brand → publish it, and ping you "
-                 "here the moment it's ready.</i>"]
+        rows.append(_field(M.F_QUEUE, f"#{queue_pos}"))
+    rows += ["", t(M.REQ_RECEIVED_BODY)]
     return Screen(caption="\n".join(rows), image=pick_artwork(),
-                  keyboard=_kb([[("📥 My Requests", cb("my_reqs"))]]))
+                  keyboard=_kb([[(t(M.BTN_MY_REQUESTS), cb("my_reqs"))]]))
 
 
 # ── Log channel: one live card per request, edited as state advances ─────────
 
-# Ordered lifecycle; the engine advances `current` through these.
-LIFECYCLE = [
-    "Requested", "Pending", "Source Assigned", "Downloading",
-    "Processing Metadata", "Extracting Subtitles", "Applying Watermark",
-    "Uploading", "Published", "Completed",
-]
-
-
 def log_card(req: dict) -> Screen:
-    """Live log card. ``req`` keys: id, title, requester, source, state,
-    optional substate (e.g. 'ep 3/25'), optional failed/reason for blocked."""
+    """``req`` keys: id, title, requester, source, state, optional substate,
+    optional failed/reason/detail, and completed-summary fields."""
     title = _esc(req.get("title", "Unknown"))
-    state = req.get("state", "Requested")
+    state = req.get("state", t(M.LC_REQUESTED))
+    labels = lifecycle_labels()
 
     if req.get("failed"):
-        rows = [f"⚠️  <b>{title}</b>", "",
-                _field("Stuck at", state),
-                _field("Reason", req.get("reason", "unknown")),
-                _field("Source", req.get("source", "—"))]
+        rows = [t(M.LOG_BLOCKED_TITLE, title=title), "",
+                _field(M.F_STUCK_AT, state),
+                _field(M.F_REASON, req.get("reason", "unknown")),
+                _field(M.F_SOURCE, req.get("source", "—"))]
         if req.get("detail"):
             rows += ["", f"<blockquote expandable>{_esc(req['detail'])}</blockquote>"]
-        kb = _kb([[("🔁 Retry", cb("log_retry", req.get("id", ""))),
-                   ("🔀 Reassign", cb("log_reassign", req.get("id", ""))),
-                   ("✖ Dismiss", cb("log_dismiss", req.get("id", "")))]])
+        kb = _kb([[(t(M.BTN_RETRY), cb("log_retry", req.get("id", ""))),
+                   (t(M.BTN_REASSIGN), cb("log_reassign", req.get("id", ""))),
+                   (t(M.BTN_DISMISS), cb("log_dismiss", req.get("id", "")))]])
         return Screen(caption="\n".join(rows), image=pick_artwork(), keyboard=kb)
 
-    if state == "Completed":
-        # Completed: no redundant status field — show what matters.
-        rows = [f"✅  <b>{title}</b>", ""]
-        for label in ("seasons", "qualities", "episodes", "source", "took"):
-            if req.get(label):
-                rows.append(_field(label.capitalize(), str(req[label])))
+    if state == t(M.LC_COMPLETED):
+        rows = [t(M.LOG_COMPLETED_TITLE, title=title), ""]
+        for key, field_key in ((("seasons"), M.F_SEASONS), ("qualities", M.F_QUALITIES),
+                                ("episodes", M.F_EPISODES), ("source", M.F_SOURCE),
+                                ("took", M.F_TOOK)):
+            if req.get(key):
+                rows.append(_field(field_key, str(req[key])))
         return Screen(caption="\n".join(rows), image=pick_artwork())
 
-    sub = f"  ·  {_esc(req['substate'])}" if req.get("substate") else ""
-    rows = [f"🐾  <b>{title}</b>", "",
-            _field("Request", f"#{req.get('id', '—')}"),
-            _field("By", req.get("requester", "—")),
-            _field("Source", req.get("source", "—")),
-            _field("Now", f"{state}{sub}"), ""]
-    # checklist with current step marked
-    try:
-        cur_idx = LIFECYCLE.index(state)
-    except ValueError:
-        cur_idx = 0
-    for i, step in enumerate(LIFECYCLE):
+    sub = f"  {t(M.SEP_DOT)}  {_esc(req['substate'])}" if req.get("substate") else ""
+    rows = [t(M.LOG_PROGRESS_TITLE, title=title), "",
+            _field(M.F_REQUEST, f"#{req.get('id', '—')}"),
+            _field(M.F_BY, req.get("requester", "—")),
+            _field(M.F_SOURCE, req.get("source", "—")),
+            _field(M.F_NOW, f"{state}{sub}"), ""]
+    cur_idx = labels.index(state) if state in labels else 0
+    for i, step in enumerate(labels):
         glyph = DONE if i < cur_idx else (CURRENT if i == cur_idx else PENDING)
-        label = f"<b>{step}</b>" if i == cur_idx else step
-        rows.append(f"{glyph}  {label}")
+        rows.append(f"{glyph}  {'<b>' + step + '</b>' if i == cur_idx else step}")
     return Screen(caption="\n".join(rows), image=pick_artwork())
