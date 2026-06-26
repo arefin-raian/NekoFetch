@@ -355,9 +355,8 @@ DB hierarchy is correct: Season → 480p → Episode Pack → Sticker → 720p �
   live-tested (title/year/seasons/episodes/rating/genres/overview + English 16:9
   backdrop; verified 1280×720). Creds in `.env` (gitignored).
 - ✅ **Section artworks** — 11 images provided, all confirmed 16:9, renamed
-  `art_01`–`art_11`; `ui/artwork.py` picker built (random, never the same twice in
-  a row; verified). `images/` is provisioned per-deployment (gitignored, like
-  `tools/`/`.env`).
+  `art_01`–`art_11` and committed under `images/`; `ui/artwork.py` picker built
+  (random, never the same twice in a row; verified).
 
 **Open questions**
 1. Series-distinction rule (§6) — validate against more titles; confirm handling
