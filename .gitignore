@@ -34,3 +34,6 @@ playground/test_results/
 playground/full_test/
 playground/nyaa_test/
 playground/**/renditions/
+
+# UI artworks (provisioned per-deployment, like tools/ and .env)
+images/
