@@ -40,13 +40,27 @@ class ProcessingPipeline:
 
             for stage in default_stages(self._c):
                 if not stage.enabled():
-                    ctx.notes.append(f"{stage.stage.value}: skipped (disabled)")
+                    note = f"{stage.stage.value}: skipped (disabled)"
+                    ctx.notes.append(note)
                     continue
                 log.info("processing.stage", job_id=job_id, stage=stage.stage.value)
+                from nekofetch.services.log_channel_service import LogChannelService
+
+                await LogChannelService(self._c).event(
+                    "processing", stage.stage.value, job=job_id,
+                    anime=req.anime_title if req else None,
+                )
                 try:
                     await stage.process(ctx)
+                    await LogChannelService(self._c).event(
+                        "processing", f"{stage.stage.value}_done", job=job_id,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     job.status = JobStatus.FAILED
+                    await LogChannelService(self._c).event(
+                        "error", f"{stage.stage.value}_failed", job=job_id,
+                        error=str(exc)[:300],
+                    )
                     raise ProcessingError(f"{stage.stage.value}: {exc}") from exc
 
             if self._c.config.processing.require_approval_before_publish:

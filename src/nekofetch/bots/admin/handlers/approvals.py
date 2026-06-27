@@ -27,27 +27,27 @@ def register(client: Client, container: Container) -> None:
             return
         from nekofetch.services.publishing_service import PublishingService
 
-        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ ᴀᴘᴘʀᴏᴠᴀʟs")
+        await loading_animation(q.message, "loading approvals")
         await q.answer()
         ready = await PublishingService(container).list_ready()
         if not ready:
             await q.message.edit_text(
-                f"{bq('<b>▸ ᴀᴘᴘʀᴏᴠᴀʟs</b>')}\n\n{bq('ɴᴏᴛʜɪɴɢ ᴀᴡᴀɪᴛɪɴɢ ᴀᴘᴘʀᴏᴠᴀʟ.')}",
+                f"{bq('<b>▸ approvals</b>')}\n\n{bq('nothing awaiting approval.')}",
                 parse_mode=ParseMode.HTML,
             )
             return
         item = ready[0]
         res = item.resolution or "—"
         aud = item.audio or "—"
-        thumb = "✓ ᴀᴠᴀɪʟᴀʙʟᴇ" if item.has_thumbnail else "✗ ɴᴏɴᴇ"
+        thumb = "✓ available" if item.has_thumbnail else "✗ none"
         text = (
-            f"{bq('<b>ᴄᴏɴᴛᴇɴᴛ ᴀᴘᴘʀᴏᴠᴀʟ</b>')}\n\n"
-            f"{bqx(f'<b>ᴀɴɪᴍᴇ:</b> <code>{item.title}</code>\n'
-                   f'<b>ꜰɪʟᴇs:</b> <code>{item.files}</code>\n'
-                   f'<b>ʀᴇsᴏʟᴜᴛɪᴏɴ:</b> <code>{res}</code>\n'
-                   f'<b>ʟᴀɴɢᴜᴀɢᴇ:</b> <code>{aud}</code>\n'
-                   f'<b>ᴛʜᴜᴍʙɴᴀɪʟ:</b> <code>{thumb}</code>\n'
-                   f'<b>ᴍᴇᴛᴀᴅᴀᴛᴀ:</b> <code>✓ ᴜᴘᴅᴀᴛᴇᴅ</code>')}"
+            f"{bq('<b>content approval</b>')}\n\n"
+            f"{bqx(f'<b>anime:</b> {item.title}\n'
+                   f'<b>files:</b> {item.files}\n'
+                   f'<b>resolution:</b> <code>{res}</code>\n'
+                   f'<b>language:</b> {aud}\n'
+                   f'<b>thumbnail:</b> {thumb}\n'
+                   f'<b>metadata:</b> ✓ updated')}"
         )
         await q.message.edit_text(
             text,
@@ -69,23 +69,23 @@ def register(client: Client, container: Container) -> None:
         _, action, code = q.data.split("|", 2)
         svc = PublishingService(container)
         if action == "pub":
-            await loading_animation(q.message, "ᴘʀᴏᴄᴇssɪɴɢ")
+            await loading_animation(q.message, "processing")
             count = await svc.publish(code)
             await q.answer(f"Published {count} files", show_alert=True)
             sp = L("status_published")
             await q.message.edit_text(
                 f"{bq(f'<b>{sp}</b>')}\n\n"
-                f"{bq(f'<code>#{code}</code> — {count} ꜰɪʟᴇs.')}",
+                f"{bq(f'<code>#{code}</code> — {count} files.')}",
                 parse_mode=ParseMode.HTML,
             )
         elif action == "reproc":
-            await loading_animation(q.message, "ᴘʀᴏᴄᴇssɪɴɢ")
+            await loading_animation(q.message, "processing")
             await svc.reprocess(code)
             await q.answer("Reprocessed")
         else:
             await svc.cancel(code)
             await q.answer("Cancelled")
             await q.message.edit_text(
-                bq(f"<code>#{code}</code> ᴄᴀɴᴄᴇʟʟᴇᴅ."),
+                bq(f"<code>#{code}</code> cancelled."),
                 parse_mode=ParseMode.HTML,
             )

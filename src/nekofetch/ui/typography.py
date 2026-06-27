@@ -1,23 +1,19 @@
+"""Text formatting helpers — HTML only.
+
+Emphasis comes from real HTML tags (Telegram HTML parse mode), not unicode
+"small caps"/"bold serif" tricks. Bold is the default for anything that matters;
+italic for secondary notes. No ``<code>`` for ordinary text.
+"""
+
 from __future__ import annotations
 
-_SMALL_CAPS = str.maketrans(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-    "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘǫʀsᴛᴜᴠᴡxʏᴢ"
-)
 
-_BOLD_UPPER = "𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭"
-_BOLD_LOWER = "𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇"
-_PLAIN_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-_PLAIN_LOWER = "abcdefghijklmnopqrstuvwxyz"
-_BOLD_SERIF = str.maketrans(_PLAIN_UPPER + _PLAIN_LOWER, _BOLD_UPPER + _BOLD_LOWER)
+def b(text: str) -> str:
+    return f"<b>{text}</b>"
 
 
-def small_caps(text: str) -> str:
-    return text.translate(_SMALL_CAPS)
-
-
-def bold_serif(text: str) -> str:
-    return text.translate(_BOLD_SERIF)
+def i(text: str) -> str:
+    return f"<i>{text}</i>"
 
 
 def bq(text: str) -> str:
@@ -29,8 +25,22 @@ def bqx(text: str) -> str:
 
 
 def heading(text: str) -> str:
-    return bq(f"<b>{bold_serif(text)}</b>")
+    """A bold heading line."""
+    return f"<b>{text}</b>"
 
 
 def field(label: str, value: str) -> str:
-    return f"<b>{small_caps(label)}:</b> <code>{value}</code>"
+    """A clean ``Label : value`` row — bold label, plain value (no code box)."""
+    return f"<b>{label}:</b> {value}"
+
+
+# ── Deprecated shims ──
+# Former unicode-styling helpers. Kept as identity passthroughs so existing
+# imports keep working while call sites migrate to plain text + <b>/<i>.
+# They intentionally do NOT transform text any more.
+def small_caps(text: str) -> str:  # noqa: D401 - deprecated, identity
+    return text
+
+
+def bold_serif(text: str) -> str:  # noqa: D401 - deprecated, identity
+    return text

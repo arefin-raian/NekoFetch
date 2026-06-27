@@ -36,26 +36,26 @@ def register(client: Client, container: Container) -> None:
         await _render(q)
 
     async def _render(q: CallbackQuery) -> None:
-        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ sᴛᴀꜰꜰ")
+        await loading_animation(q.message, "loading staff")
         team = await StaffService(container).list_team()
         rows = []
         if team:
             lines = []
             for m in team:
                 glyph = DIAMOND_HOLLOW if m.banned else DIAMOND_FILLED
-                lines.append(f"{glyph} {m.name} — {m.role}" + ("  (ʙᴀɴɴᴇᴅ)" if m.banned else ""))
+                lines.append(f"{glyph} {m.name} — {m.role}" + ("  (banned)" if m.banned else ""))
                 if m.role != "admin":
                     rows.append([
-                        (f"ʀᴇᴍᴏᴠᴇ {m.name[:14]}", cb("staff", "rm", m.telegram_id)),
-                        ("ᴜɴʙᴀɴ" if m.banned else "ʙᴀɴ", cb("staff", "ban", m.telegram_id, 0 if m.banned else 1)),
+                        (f"remove {m.name[:14]}", cb("staff", "rm", m.telegram_id)),
+                        ("unban" if m.banned else "ban", cb("staff", "ban", m.telegram_id, 0 if m.banned else 1)),
                     ])
             body = "\n".join(lines)
         else:
-            body = "ɴᴏ sᴛᴀꜰꜰ ʏᴇᴛ."
-        rows.append([("➜ ᴀᴅᴅ sᴛᴀꜰꜰ", cb("staff", "add"))])
-        rows.append([("← ʙᴀᴄᴋ", cb("admin", "home"))])
+            body = "no staff yet."
+        rows.append([("➜ add staff", cb("staff", "add"))])
+        rows.append([("← back", cb("admin", "home"))])
         await q.message.edit_text(
-            f"{bq('<b>▸ sᴛᴀꜰꜰ & ᴜsᴇʀs</b>')}\n\n{bq(body)}",
+            f"{bq('<b>▸ staff & users</b>')}\n\n{bq(body)}",
             reply_markup=keyboard(*rows),
             parse_mode=ParseMode.HTML,
         )
@@ -68,9 +68,9 @@ def register(client: Client, container: Container) -> None:
         await fsm.set(q.from_user.id, STATE_ADD)
         await q.answer()
         await q.message.edit_text(
-            bq("<b>ᴀᴅᴅ sᴛᴀꜰꜰ</b>\n\n"
-               "sᴇɴᴅ ᴛʜᴇ ᴛᴇʟᴇɢʀᴀᴍ <b>ᴜsᴇʀ ɪᴅ</b> ᴛᴏ ᴘʀᴏᴍᴏᴛᴇ ᴛᴏ sᴛᴀꜰꜰ.\n"
-               "(ᴛʜᴇ ᴜsᴇʀ ᴄᴀɴ ɢᴇᴛ ᴛʜᴇɪʀ ɪᴅ ꜰʀᴏᴍ @ᴜsᴇʀɪɴꜰᴏʙᴏᴛ.)"),
+            bq("<b>add staff</b>\n\n"
+               "send the telegram <b>user id</b> to promote to staff.\n"
+               "(the user can get their id from @userinfobot.)"),
             parse_mode=ParseMode.HTML,
         )
 
@@ -82,7 +82,7 @@ def register(client: Client, container: Container) -> None:
         target = int(q.data.split("|")[2])
         try:
             await StaffService(container).remove_staff(q.from_user.id, target)
-            await q.answer("ᴅᴇᴍᴏᴛᴇᴅ ᴛᴏ ᴜsᴇʀ")
+            await q.answer("demoted to user")
         except NekoFetchError as exc:
             await q.answer(exc.detail or L("error_generic"), show_alert=True)
             return
@@ -97,7 +97,7 @@ def register(client: Client, container: Container) -> None:
         target, banned = int(parts[2]), bool(int(parts[3]))
         try:
             await StaffService(container).set_banned(q.from_user.id, target, banned)
-            await q.answer("ʙᴀɴɴᴇᴅ" if banned else "ᴜɴʙᴀɴɴᴇᴅ")
+            await q.answer("banned" if banned else "unbanned")
         except NekoFetchError as exc:
             await q.answer(exc.detail or L("error_generic"), show_alert=True)
             return
@@ -114,7 +114,7 @@ def register(client: Client, container: Container) -> None:
         raw = message.text.strip()
         if not raw.lstrip("-").isdigit():
             await message.reply(
-                bq("ᴛʜᴀᴛ ᴅᴏᴇsɴ'ᴛ ʟᴏᴏᴋ ʟɪᴋᴇ ᴀ ɴᴜᴍᴇʀɪᴄ ᴜsᴇʀ ɪᴅ."),
+                bq("that doesn't look like a numeric user id."),
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -124,6 +124,6 @@ def register(client: Client, container: Container) -> None:
             await message.reply(bq(exc.detail or L("error_generic")), parse_mode=ParseMode.HTML)
             return
         await message.reply(
-            bq(f"{DIAMOND_FILLED} ᴜsᴇʀ <code>{raw}</code> ᴘʀᴏᴍᴏᴛᴇᴅ ᴛᴏ sᴛᴀꜰꜰ."),
+            bq(f"{DIAMOND_FILLED} user <code>{raw}</code> promoted to staff."),
             parse_mode=ParseMode.HTML,
         )

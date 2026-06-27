@@ -58,6 +58,10 @@ class EnvSettings(BaseSettings):
     storage_path: Path = Field(Path("/data/storage"), alias="STORAGE_PATH")
     session_path: Path = Field(Path("/data/sessions"), alias="SESSION_PATH")
 
+    # TMDB
+    tmdb_read_access_token: str = Field("", alias="TMDB_API_READ_ACCESS_TOKEN")
+    tmdb_api_key: str = Field("", alias="TMDB_API_KEY")
+
     # Logging
     log_level: str = Field("INFO", alias="LOG_LEVEL")
     log_json: bool = Field(False, alias="LOG_JSON")

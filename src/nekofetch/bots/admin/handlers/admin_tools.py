@@ -35,9 +35,9 @@ def register(client: Client, container: Container) -> None:
         await fsm.set(q.from_user.id, STATE_BROADCAST)
         await q.answer()
         await q.message.edit_text(
-            bq("<b>ʙʀᴏᴀᴅᴄᴀsᴛ</b>\n\n"
-               "sᴇɴᴅ ᴛʜᴇ ᴍᴇssᴀɢᴇ ᴛᴏ ʙʀᴏᴀᴅᴄᴀsᴛ (ᴛᴇxᴛ ᴏʀ ᴍᴇᴅɪᴀ). "
-               "ɪᴛ ᴡɪʟʟ ʙᴇ ᴄᴏᴘɪᴇᴅ ᴛᴏ ᴀʟʟ ᴜsᴇʀs."),
+            bq("<b>broadcast</b>\n\n"
+               "send the message to broadcast (text or media). "
+               "it will be copied to all users."),
             parse_mode=ParseMode.HTML,
         )
 
@@ -54,9 +54,9 @@ def register(client: Client, container: Container) -> None:
             ids = await UserRepository(session).all_telegram_ids()
 
         status = await message.reply(
-            "<code>ʙʀᴏᴀᴅᴄᴀsᴛɪɴɢ!</code>", parse_mode=ParseMode.HTML
+            "<b>broadcasting!</b>", parse_mode=ParseMode.HTML
         )
-        await loading_animation(status, "ʙʀᴏᴀᴅᴄᴀsᴛɪɴɢ")
+        await loading_animation(status, "broadcasting")
         sent = failed = 0
         for uid in ids:
             try:
@@ -72,7 +72,7 @@ def register(client: Client, container: Container) -> None:
             "admin", "broadcast", sent=sent, failed=failed, by=message.from_user.id
         )
         await status.edit_text(
-            f"{bq('<b>ʙʀᴏᴀᴅᴄᴀsᴛ ᴄᴏᴍᴘʟᴇᴛᴇ</b>')}\n\n"
-            f"{bq(f'ᴅᴇʟɪᴠᴇʀᴇᴅ: <code>{sent}</code>\nꜰᴀɪʟᴇᴅ: <code>{failed}</code>')}",
+            f"{bq('<b>broadcast complete</b>')}\n\n"
+            f"{bq(f'delivered: <b>{sent}</b>\nfailed: <b>{failed}</b>')}",
             parse_mode=ParseMode.HTML,
         )

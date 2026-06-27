@@ -15,17 +15,17 @@ def welcome_keyboard(localizer: Localizer, role: Role, lang: str = "en") -> Inli
         ]
     ]
     if role in (Role.STAFF, Role.ADMIN):
-        rows.append([("▸ ʀᴇᴠɪᴇᴡ ʀᴇǫᴜᴇsᴛs", cb("staff", "requests", 0)),
-                     ("▸ ᴅᴏᴡɴʟᴏᴀᴅs ǫᴜᴇᴜᴇ", cb("queue", "view", 0))])
+        rows.append([("▸ review requests", cb("staff", "requests", 0)),
+                     ("▸ downloads queue", cb("queue", "view", 0))])
     if role is Role.ADMIN:
-        rows.append([("◈ ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ", cb("admin", "home"))])
+        rows.append([("◈ admin panel", cb("admin", "home"))])
     return keyboard(*rows)
 
 
 def admin_home_keyboard() -> InlineKeyboardMarkup:
     return keyboard(
-        [("▸ ǫᴜᴇᴜᴇ", cb("queue", "view", 0)), ("▸ ᴀɴᴀʟʏᴛɪᴄs", cb("admin", "analytics"))],
-        [("▸ sᴛᴀꜰꜰ", cb("admin", "staff")), ("▸ ʙᴏᴛs", cb("admin", "bots"))],
-        [("▸ sᴇᴛᴛɪɴɢs", cb("settings", "home")), ("▸ sᴛᴏʀᴀɢᴇ", cb("admin", "storage"))],
-        [("▸ ᴀᴘᴘʀᴏᴠᴀʟs", cb("approve", "panel")), ("▸ ʙʀᴏᴀᴅᴄᴀsᴛ", cb("admin", "broadcast"))],
+        [("▸ queue", cb("queue", "view", 0)), ("▸ analytics", cb("admin", "analytics"))],
+        [("▸ staff", cb("admin", "staff")), ("▸ bots", cb("admin", "bots"))],
+        [("▸ settings", cb("settings", "home")), ("▸ storage", cb("admin", "storage"))],
+        [("▸ approvals", cb("approve", "panel")), ("▸ broadcast", cb("admin", "broadcast"))],
     )

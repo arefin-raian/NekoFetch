@@ -1,6 +1,18 @@
-from __future__ import annotations
+"""Phase 1 request flow — AniList-first discovery, franchise confirmation.
 
-import asyncio
+Source plugins must never perform discovery searches. Searching occurs
+exclusively through AniList, with TMDB as a fallback for backdrops.
+
+Workflow:
+  1. User submits an anime name.
+  2. Query AniList first — get full metadata + relation graph.
+  3. If multiple adaptations exist (Hellsing vs Ultimate), present version picker.
+  4. Otherwise show a rich confirmation card with franchise breakdown.
+  5. On confirm → register a franchise-level request, forward to admin/log.
+  6. TMDB fallback: search TV entries only when AniList finds nothing.
+"""
+
+from __future__ import annotations
 
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -9,224 +21,275 @@ from pyrogram.types import CallbackQuery, Message
 from nekofetch.bots.fsm import FSM
 from nekofetch.core.container import Container
 from nekofetch.core.exceptions import NekoFetchError
-from nekofetch.core.parsing import parse_episode_spec
-from nekofetch.domain.enums import ContentKind, DownloadScope
-from nekofetch.ui import progress
-from nekofetch.ui.components import cb, keyboard, paginate, parse_cb
-from nekofetch.ui.progress import loading_animation, staged_loading
-from nekofetch.ui.typography import bq, bqx
+from nekofetch.domain.enums import DownloadScope
+from nekofetch.localization.messages import M, t
+from nekofetch.ui.screens import (
+    Screen,
+    ask_title,
+    choose_version,
+    confirm_franchise,
+    request_received,
+    retry_title,
+    send_screen,
+)
 
 STATE_NAME = "req:await_name"
-STATE_EPISODES = "req:await_episodes"
+STATE_FRANCHISE = "req:franchise"
 
 
 def register(client: Client, container: Container) -> None:
-    localizer = container.localizer
     fsm = FSM(container.redis, bot="admin")
-    default_source = container.config.sources.default
-
-    def L(key: str, lang: str = "en", **kw) -> str:
-        return localizer.get(key, lang, **kw)
 
     @client.on_callback_query(filters.regex(r"^req\|new"))
     async def _new(_: Client, q: CallbackQuery) -> None:
         await fsm.set(q.from_user.id, STATE_NAME)
-        await q.message.edit_text(bq(L("prompt_anime_name")), parse_mode=ParseMode.HTML)
+        screen = ask_title()
+        await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
         await q.answer()
 
     @client.on_message(filters.text & filters.private & ~filters.command(["start"]))
     async def _text(_: Client, message: Message) -> None:
         if not message.from_user:
             return
-        state, data = await fsm.get(message.from_user.id)
-        if state == STATE_NAME:
-            await _do_search(message, message.text.strip())
-        elif state == STATE_EPISODES:
-            await _submit_selected(message, data, message.text.strip())
+        state, _data = await fsm.get(message.from_user.id)
+        # In either state a typed message is a (new) title to look up — while a
+        # confirmation card is shown, typing means "actually, search this instead".
+        if state in (STATE_NAME, STATE_FRANCHISE):
+            await _search_anilist(message, message.text.strip())
 
-    async def _do_search(message: Message, query: str) -> None:
-        msg = await message.reply("<code>sᴇᴀʀᴄʜɪɴɢ!</code>", parse_mode=ParseMode.HTML)
-        await staged_loading(msg, ["sᴇᴀʀᴄʜɪɴɢ", "ʀᴇᴛʀɪᴇᴠɪɴɢ ʀᴇsᴜʟᴛs"])
+    # ──────────────────────────────────────────────────────────────────────────
+    # Phase 1 search — AniList only, no source plugin search
+    # ──────────────────────────────────────────────────────────────────────────
+    async def _search_anilist(message: Message, query: str) -> None:
+        msg = await message.reply(t(M.CONFIRM_ANILIST_SEARCH), parse_mode=ParseMode.HTML)
+
+        # --- 1. Query AniList ---
+        media = await container.anilist.search(query)
+        if media is None:
+            # Fallback: try TMDB (TV preferred, then movie)
+            await msg.edit_text(t(M.CONFIRM_TMDB_FALLBACK), parse_mode=ParseMode.HTML)
+            tmdb_result = await container.tmdb.search(query)
+            if tmdb_result is None:
+                await msg.edit_text(t(M.SEARCH_ANILIST_NOT_FOUND), parse_mode=ParseMode.HTML)
+                return
+
+            # TMDB fallback: build a minimal franchise info
+            franchise_data = {
+                "title": tmdb_result.title,
+                "year": tmdb_result.year,
+                "format": tmdb_result.media_type.upper(),
+                "status": None,
+                "score": tmdb_result.rating,
+                "studio": None,
+                "genres": tmdb_result.genres,
+                "synopsis": tmdb_result.overview,
+                "franchise_episodes": tmdb_result.episodes,
+                "franchise_seasons": tmdb_result.seasons or 1,
+            "franchise_movies": 0,
+            "franchise_ovas": 0,
+            "franchise_onas": 0,
+            "franchise_specials": 0,
+            "relations": [],
+            "anilist_id": str(tmdb_result.id),
+                "anilist_url": None,
+                "cover_url": tmdb_result.poster_url,
+                "banner_url": tmdb_result.backdrop_url,
+                "_source": "tmdb",
+                "_query": query,
+            }
+            await fsm.set(
+                message.from_user.id, STATE_FRANCHISE,
+                franchise=franchise_data,
+            )
+            screen = confirm_franchise(franchise_data)
+            msg = await send_screen(client, message.chat.id, screen, old_msg=msg)
+            return
+
+        # --- 2. Detect adaptations via SeriesResolver ---
+        resolution = await container.series_resolver.resolve(query)
+        franchise_data = _media_to_franchise_dict(media)
+
+        if resolution.multiple:
+            # Show version picker — use 'id' key for choose_version compat
+            versions = [
+                {
+                    "title": e.title,
+                    "id": str(e.anilist_id or media.id),
+                    "anilist_id": str(e.anilist_id or media.id),
+                    "format": e.format,
+                    "year": None,
+                    "episodes": None,
+                    "aliases": e.aliases,
+                }
+                for e in resolution.entries
+            ]
+            await fsm.set(
+                message.from_user.id, "req:versions",
+                versions=versions, query=query, franchise=franchise_data,
+            )
+            screen = choose_version(query, versions)
+            msg = await send_screen(client, message.chat.id, screen, old_msg=msg)
+            return
+
+        # --- 3. Single match — fetch TMDB for synopsis + backdrop ---
+        # TMDB synopsis is preferred (better franchise-level overview) over AniList's.
+        backdrop_path = None
         try:
-            source = container.sources.get(default_source)
-            results = await source.search(query)
-        except NekoFetchError as exc:
-            await msg.edit_text(bq(L(exc.message_key)), parse_mode=ParseMode.HTML)
-            return
+            tmdb_match = await container.tmdb.search(media.titles[0] if media.titles else query)
+            if tmdb_match:
+                backdrop_path = tmdb_match.backdrop_url
+                if tmdb_match.overview:
+                    franchise_data["synopsis"] = tmdb_match.overview
+        except Exception:
+            pass
 
-        if not results:
-            header = L("search_results_header")
-            await msg.edit_text(
-                f"{bq(f'<b>{header}</b>')}\n\n"
-                f"{bq(f'ɴᴏ ᴍᴀᴛᴄʜᴇs ꜰᴏʀ <code>{query}</code>.')}",
-                parse_mode=ParseMode.HTML,
-            )
-            await fsm.clear(message.from_user.id)
-            return
+        franchise_data["_backdrop_url"] = backdrop_path
 
-        cache = [{"ref": r.source_ref, "title": r.title} for r in results[:50]]
-        await fsm.set(message.from_user.id, "req:results", results=cache)
-        await msg.edit_text(
-            _results_text(results),
-            reply_markup=_results_kb(cache, page=0),
-            parse_mode=ParseMode.HTML,
-        )
-
-    def _results_text(results) -> str:
-        lines = [f"<b>{i + 1}.</b> {r.title}" for i, r in enumerate(results[:8])]
-        header = L("search_results_header")
-        return (
-            f"{bq(f'<b>{header}</b>')}\n\n"
-            f"{bqx(chr(10).join(lines))}"
-        )
-
-    def _results_kb(cache: list[dict], page: int):
-        items = [(f"{i + 1}. {r['title']}", cb("req", "pick", i)) for i, r in enumerate(cache)]
-        return paginate(items, page=page, nav_action="req|spage", page_size=8)
-
-    @client.on_callback_query(filters.regex(r"^req\|spage"))
-    async def _spage(_: Client, q: CallbackQuery) -> None:
-        _, args = parse_cb(q.data)
-        _, data = await fsm.get(q.from_user.id)
-        cache = data.get("results", [])
-        await q.message.edit_reply_markup(_results_kb(cache, page=int(args[1])))
-        await q.answer()
-
-    @client.on_callback_query(filters.regex(r"^req\|pick"))
-    async def _pick(_: Client, q: CallbackQuery) -> None:
-        _, args = parse_cb(q.data)
-        _, data = await fsm.get(q.from_user.id)
-        cache = data.get("results", [])
-        idx = int(args[1])
-        if idx >= len(cache):
-            await q.answer(L("error_generic"), show_alert=True)
-            return
-        chosen = cache[idx]
-        await q.answer()
-
-        msg = q.message
-        await loading_animation(msg, "ʟᴏᴀᴅɪɴɢ ᴄᴏɴᴛᴇɴᴛ", steps=3, delay=0.3)
-
-        source = container.sources.get(default_source)
-        details = await source.get_details(chosen["ref"])
         await fsm.set(
-            q.from_user.id, "req:content",
-            ref=chosen["ref"], title=details.title,
-            season_count=details.season_count or 1,
+            message.from_user.id, STATE_FRANCHISE,
+            franchise=franchise_data, query=query,
         )
-        await msg.edit_text(
-            _details_text(details), reply_markup=_content_kb(details.season_count or 1),
-            parse_mode=ParseMode.HTML,
-        )
+        screen = confirm_franchise(franchise_data, backdrop_path=backdrop_path)
+        msg = await send_screen(client, message.chat.id, screen, old_msg=msg)
 
-    def _details_text(d) -> str:
-        parts = [f"{bq(f'<b>{d.title}</b>')}"]
-        if d.synopsis:
-            parts.append(d.synopsis[:400])
-        if d.genres:
-            parts.append(f"<b>ɢᴇɴʀᴇs:</b> {', '.join(d.genres)}")
-        cs = L("content_seasons")
-        cm = L("content_movies")
-        csp = L("content_specials")
-        parts.append(
-            f"<b>ᴀᴠᴀɪʟᴀʙʟᴇ ᴄᴏɴᴛᴇɴᴛ</b>\n"
-            f"{bq(f'◆ {cs}: {d.season_count or 1}')}\n"
-            f"{bq(f'◆ {cm}')}\n"
-            f"{bq(f'◆ {csp}')}"
-        )
-        return "\n\n".join(parts)
-
-    def _content_kb(season_count: int):
-        rows = []
-        row = []
-        for s in range(1, max(season_count, 1) + 1):
-            row.append((f"Season {s}", cb("req", "season", s)))
-            if len(row) == 3:
-                rows.append(row)
-                row = []
-        if row:
-            rows.append(row)
-        rows.append([(L("content_movies"), cb("req", "kind", "movie")),
-                     (L("content_specials"), cb("req", "kind", "special"))])
-        return keyboard(*rows)
-
-    @client.on_callback_query(filters.regex(r"^req\|season"))
-    async def _season(_: Client, q: CallbackQuery) -> None:
-        _, args = parse_cb(q.data)
-        await loading_animation(q.message, "ʀᴇᴛʀɪᴇᴠɪɴɢ sᴇᴀsᴏɴs")
-        await fsm.update(q.from_user.id, season=int(args[1]), kind=ContentKind.SEASON.value)
-        await q.answer()
-        dsh = L("download_scope_header")
-        await q.message.edit_text(
-            f"{bq(f'<b>{dsh}</b>')}\n\n"
-            f"{bq(f'sᴇᴀsᴏɴ {args[1]}')}",
-            reply_markup=keyboard(
-                [(L("btn_entire_series"), cb("req", "scope", "series"))],
-                [(L("btn_selected_episodes"), cb("req", "scope", "eps"))],
-            ),
-            parse_mode=ParseMode.HTML,
-        )
-
-    @client.on_callback_query(filters.regex(r"^req\|kind"))
-    async def _kind(_: Client, q: CallbackQuery) -> None:
-        _, args = parse_cb(q.data)
-        await fsm.update(q.from_user.id, season=None, kind=args[1])
-        await q.answer()
-        dsh = L("download_scope_header")
-        await q.message.edit_text(
-            f"{bq(f'<b>{dsh}</b>')}",
-            reply_markup=keyboard([(L("btn_entire_series"), cb("req", "scope", "series"))]),
-            parse_mode=ParseMode.HTML,
-        )
-
-    @client.on_callback_query(filters.regex(r"^req\|scope"))
-    async def _scope(_: Client, q: CallbackQuery) -> None:
-        _, args = parse_cb(q.data)
-        if args[1] == "eps":
-            await fsm.set(q.from_user.id, STATE_EPISODES, **(await fsm.get(q.from_user.id))[1])
-            await q.message.edit_text(
-                bq("ᴇɴᴛᴇʀ ᴇᴘɪsᴏᴅᴇs (ᴇ.ɢ. 1-12, 14, 20)."),
-                parse_mode=ParseMode.HTML,
-            )
-            await q.answer()
-            return
+    # ──────────────────────────────────────────────────────────────────────────
+    # Version picker callbacks
+    # ──────────────────────────────────────────────────────────────────────────
+    @client.on_callback_query(filters.regex(r"^ver_pick\|"))
+    async def _ver_pick(_: Client, q: CallbackQuery) -> None:
+        _, args = q.data.split("|", 1)
+        picked_id = args
         _, data = await fsm.get(q.from_user.id)
-        await _finalize(q.message, q.from_user.id, data, scope=DownloadScope.ENTIRE_SERIES)
+        versions = data.get("versions", [])
+        query = data.get("query", "Anime")
+
+        # Find the picked version by id
+        chosen = next(
+            (v for v in versions if str(v.get("id")) == picked_id),
+            versions[0],
+        )
+        chosen_anilist_id = chosen.get("anilist_id") or chosen.get("id")
+
+        # Refetch full media data for the chosen version using _fetch_full
+        try:
+            refetched = await container.anilist._fetch_full(int(chosen_anilist_id))
+        except (ValueError, TypeError):
+            refetched = None
+
+        if refetched:
+            franchise_data = _media_to_franchise_dict(refetched)
+        else:
+            # Fallback: build minimal franchise data from what we have
+            franchise_data = {
+                "title": chosen.get("title", query),
+                "year": None,
+                "format": chosen.get("format"),
+                "status": None,
+                "score": None,
+                "studio": None,
+                "genres": [],
+                "synopsis": None,
+                "franchise_episodes": None,
+                "franchise_seasons": 1,
+                "franchise_movies": 0,
+                "franchise_ovas": 0,
+                "franchise_onas": 0,
+                "franchise_specials": 0,
+                "relations": [],
+                "anilist_id": chosen_anilist_id,
+                "anilist_url": None,
+                "cover_url": None,
+                "banner_url": None,
+                "_source": "anilist",
+            }
+
+        franchise_data["title"] = chosen.get("title", franchise_data.get("title", query))
+
+        await fsm.set(
+            q.from_user.id, STATE_FRANCHISE,
+            franchise=franchise_data, query=query,
+        )
+        screen = confirm_franchise(franchise_data)
+        await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
         await q.answer()
 
-    async def _submit_selected(message: Message, data: dict, spec: str) -> None:
-        episodes = parse_episode_spec(spec)
-        if not episodes:
-            await message.reply(
-                bq("ᴄᴏᴜʟᴅɴ'ᴛ ᴘᴀʀsᴇ ᴛʜᴀᴛ. ᴛʀʏ ᴇ.ɢ. 1-12, 14."),
-                parse_mode=ParseMode.HTML,
-            )
-            return
-        data = {**data, "episodes": episodes}
-        msg = await message.reply("<code>sᴜʙᴍɪᴛᴛɪɴɢ ʀᴇǫᴜᴇsᴛ!</code>", parse_mode=ParseMode.HTML)
-        await loading_animation(msg, "sᴜʙᴍɪᴛᴛɪɴɢ ʀᴇǫᴜᴇsᴛ")
-        await _finalize(msg, message.from_user.id, data, scope=DownloadScope.SELECTED_EPISODES)
+    # ──────────────────────────────────────────────────────────────────────────
+    # Confirmation / rejection
+    # ──────────────────────────────────────────────────────────────────────────
+    @client.on_callback_query(filters.regex(r"^series_yes\|"))
+    async def _confirm(_: Client, q: CallbackQuery) -> None:
+        _, data = await fsm.get(q.from_user.id)
+        franchise_data = data.get("franchise", {})
+        query = data.get("query", franchise_data.get("title", "Anime"))
+        name = q.from_user.first_name if q.from_user else ""
+        await q.answer()
+        await _finalize(q.message, q.from_user.id, name, franchise_data, query=query)
 
-    async def _finalize(message, user_id: int, data: dict, *, scope: DownloadScope) -> None:
-        from nekofetch.services.request_service import RequestService
+    @client.on_callback_query(filters.regex(r"^series_no$"))
+    async def _reject(_: Client, q: CallbackQuery) -> None:
+        await fsm.set(q.from_user.id, STATE_NAME)
+        screen = retry_title()
+        await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
+        await q.answer()
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Finalize — submit the franchise request
+    # ──────────────────────────────────────────────────────────────────────────
+    async def _finalize(
+        card_msg: Message,
+        user_id: int,
+        user_name: str,
+        franchise_data: dict,
+        *,
+        query: str,
+    ) -> None:
         from nekofetch.services.queue_service import QueueService
+        from nekofetch.services.request_service import RequestService
 
-        await asyncio.sleep(0)
+        title = franchise_data.get("title", query)
+        anilist_id = franchise_data.get("anilist_id")
+        source = franchise_data.get("_source", "anilist")
+
+        # Build franchise_data JSON for the request record
+        franchise_json = {
+            "anilist_id": anilist_id,
+            "source": source,
+            "query": query,
+            "title": title,
+            "year": franchise_data.get("year"),
+            "format": franchise_data.get("format"),
+            "franchise_episodes": franchise_data.get("franchise_episodes"),
+            "franchise_seasons": franchise_data.get("franchise_seasons"),
+            "franchise_movies": franchise_data.get("franchise_movies"),
+            "franchise_ovas": franchise_data.get("franchise_ovas"),
+            "franchise_onas": franchise_data.get("franchise_onas"),
+            "franchise_specials": franchise_data.get("franchise_specials"),
+            "relations": franchise_data.get("relations", []),
+            "genres": franchise_data.get("genres", []),
+        }
+
         try:
             receipt = await RequestService(container).submit(
                 telegram_id=user_id,
-                source=default_source,
-                source_ref=data["ref"],
-                anime_title=data["title"],
-                scope=scope,
-                season=data.get("season"),
-                episodes=data.get("episodes"),
+                source=source,
+                source_ref=f"anilist:{anilist_id}" if anilist_id else query,
+                anime_title=title,
+                scope=DownloadScope.ENTIRE_SERIES,
+                season=None,
+                episodes=None,
+                franchise_data=franchise_json,
             )
         except NekoFetchError as exc:
-            await message.edit_text(bq(L(exc.message_key)), parse_mode=ParseMode.HTML)
+            # Submission failed (e.g. duplicate) — surface the error, reset to retry.
+            await fsm.set(user_id, STATE_NAME)
+            await send_screen(
+                client, card_msg.chat.id,
+                Screen(caption=t(exc.message_key)), old_msg=card_msg,
+            )
             return
         await fsm.clear(user_id)
 
+        # Admin users auto-queue; regular users wait for staff review
         is_admin = user_id in container.env.admin_ids
         if is_admin:
             try:
@@ -234,33 +297,70 @@ def register(client: Client, container: Container) -> None:
             except NekoFetchError:
                 pass
 
-        ep = L("request_eta_pending")
-        await message.edit_text(
-            f"{bq('<b>✅ ʀᴇǫᴜᴇsᴛ ᴀᴄᴄᴇᴘᴛᴇᴅ</b>')}\n\n"
-            f"{bqx(f'<b>ʀᴇǫᴜᴇsᴛ ɪᴅ:</b> <code>#{receipt.code}</code>\n'
-                   f'<b>ᴘᴏsɪᴛɪᴏɴ:</b> <code>{receipt.position}</code>\n'
-                   f'<b>ᴇᴛᴀ:</b> <code>{ep}</code>')}",
-            parse_mode=ParseMode.HTML,
-        )
+        screen = request_received(user_name, title, queue_pos=receipt.position)
+        await send_screen(client, card_msg.chat.id, screen, old_msg=card_msg)
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # My Requests
+    # ──────────────────────────────────────────────────────────────────────────
     @client.on_callback_query(filters.regex(r"^req\|mine"))
     async def _mine(_: Client, q: CallbackQuery) -> None:
         from nekofetch.services.request_service import RequestService
+        from nekofetch.ui.screens import my_requests as my_reqs_screen
 
-        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ ʀᴇǫᴜᴇsᴛs")
-        rows = await RequestService(container).list_for_user(q.from_user.id)
         await q.answer()
+        rows = await RequestService(container).list_for_user(q.from_user.id)
+        name = q.from_user.first_name if q.from_user else ""
         if not rows:
-            await q.message.edit_text(
-                bq("ʏᴏᴜ ʜᴀᴠᴇ ɴᴏ ʀᴇǫᴜᴇsᴛs ʏᴇᴛ."),
-                parse_mode=ParseMode.HTML,
-            )
+            screen = my_reqs_screen(name, [])
+            await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
             return
-        lines = [
-            f"<b>#{r.code}</b> ◆ {r.anime_title} — <code>{r.status}</code>" for r in rows[:10]
-        ]
-        bmr = L("btn_my_requests")
-        await q.message.edit_text(
-            f"{bq(f'<b>{bmr}</b>')}\n\n{bqx(chr(10).join(lines))}",
-            parse_mode=ParseMode.HTML,
-        )
+        req_list = [{"title": r.anime_title, "status": r.status} for r in rows[:10]]
+        screen = my_reqs_screen(name, req_list)
+        await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
+
+    # ── Home (back/welcome navigation) ──
+    @client.on_callback_query(filters.regex(r"^(home)$"))
+    async def _home(_: Client, q: CallbackQuery) -> None:
+        from nekofetch.ui.screens import welcome as welcome_screen
+
+        name = q.from_user.first_name or ""
+        screen = welcome_screen(name)
+        await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
+        await q.answer()
+
+    # ── Helper ────────────────────────────────────────────────────────────────────
+
+def _media_to_franchise_dict(media) -> dict:
+    """Convert an AnilistMedia into the dict shape `confirm_franchise` expects."""
+    return {
+        "title": media.titles[0] if media.titles else "Unknown",
+        "year": media.year,
+        "format": media.format,
+        "status": media.status,
+        "score": media.score,
+        "studio": media.studio,
+        "genres": media.genres,
+        "synopsis": media.synopsis,
+        "franchise_episodes": media.franchise_episodes,
+        "franchise_seasons": media.franchise_seasons,
+        "franchise_movies": media.franchise_movies,
+        "franchise_ovas": media.franchise_ovas,
+        "franchise_onas": media.franchise_onas,
+        "franchise_specials": media.franchise_specials,
+        "relations": [
+            {
+                "relation": r.relation,
+                "format": r.format,
+                "episodes": r.episodes,
+                "titles": r.titles,
+                "anilist_id": r.anilist_id,
+            }
+            for r in media.relations
+        ],
+        "anilist_id": str(media.id),
+        "anilist_url": media.anilist_url,
+        "cover_url": media.cover_url,
+        "banner_url": media.banner_url,
+        "_source": "anilist",
+    }

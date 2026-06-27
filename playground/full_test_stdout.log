@@ -1,0 +1,53 @@
+[16:59:09] === FULL VERIFICATION TEST === ffmpeg=True ffprobe=True
+[16:59:09] --- SOURCE: kickassanime ---
+[16:59:09] CASE kickassanime :: Cowboy Bebop (1998 classic)
+[16:59:15]   DL kickassanime/Cowboy Bebop ...
+2026-06-25 17:07:11 [info     ] mux.ok                         audios=1 bytes=1026121251 out=C:\Users\Admin\Documents\NekoFetch\playground\full_test\kickassanime\cowboy_bebop\ep01.mkv subs=1
+[17:07:25]     Cowboy Bebop: label=SUBBED V=True A=1 S=1 decode=OK problems=0
+[17:07:31] CASE kickassanime :: Death Note (2006 older)
+[17:07:37]   DL kickassanime/Death Note ...
+2026-06-25 17:10:32 [info     ] mux.ok                         audios=2 bytes=290464742 out=C:\Users\Admin\Documents\NekoFetch\playground\full_test\kickassanime\death_note\ep01.mkv subs=1
+[17:10:35]     Death Note: label=Dual Audio V=True A=2 S=1 decode=OK problems=0
+[17:10:41] CASE kickassanime :: Attack on Titan (2013 mid)
+[17:10:46]   DL kickassanime/Attack on Titan ...
+2026-06-25 17:14:43 [info     ] mux.ok                         audios=2 bytes=433661707 out=C:\Users\Admin\Documents\NekoFetch\playground\full_test\kickassanime\attack_on_titan\ep01.mkv subs=1
+[17:14:47]     Attack on Titan: label=Dual Audio V=True A=2 S=1 decode=OK problems=0
+[17:14:54] CASE kickassanime :: Demon Slayer (2019 mid)
+[17:15:00]   DL kickassanime/Demon Slayer ...
+2026-06-25 17:18:21 [info     ] mux.ok                         audios=2 bytes=350129021 out=C:\Users\Admin\Documents\NekoFetch\playground\full_test\kickassanime\demon_slayer\ep01.mkv subs=9
+[17:18:26]     Demon Slayer: label=Dual Audio V=True A=2 S=9 decode=OK problems=0
+[17:18:32] CASE kickassanime :: Frieren (2023 recent)
+[17:18:38]   DL kickassanime/Frieren ...
+2026-06-25 17:21:57 [info     ] mux.ok                         audios=3 bytes=369538105 out=C:\Users\Admin\Documents\NekoFetch\playground\full_test\kickassanime\frieren\ep01.mkv subs=9
+[17:22:03]     Frieren: label=Multi Audio V=True A=3 S=9 decode=OK problems=0
+[17:22:09] CASE kickassanime :: Solo Leveling (2024 recent)
+[17:22:16]   DL kickassanime/Solo Leveling ...
+2026-06-25 17:24:33 [info     ] mux.ok                         audios=1 bytes=291251899 out=C:\Users\Admin\Documents\NekoFetch\playground\full_test\kickassanime\solo_leveling\ep01.mkv subs=12
+[17:24:37]     Solo Leveling: label=SUBBED V=True A=1 S=12 decode=OK problems=0
+[17:24:43] --- SOURCE: anikoto ---
+[17:24:43] CASE anikoto :: Cowboy Bebop (1998 classic)
+[17:24:50]     Cowboy Bebop: label=None V=True A=1 S=1 decode=OK problems=0
+[17:24:56] CASE anikoto :: Death Note (2006 older)
+[17:25:03]     Death Note: label=None V=True A=1 S=0 decode=OK problems=0
+[17:25:09] CASE anikoto :: Attack on Titan (2013 mid)
+Exception in thread Thread-51 (_readerthread):
+Traceback (most recent call last):
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1075, in _bootstrap_inner
+    self.run()
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python312\Lib\threading.py", line 1012, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python312\Lib\subprocess.py", line 1599, in _readerthread
+    buffer.append(fh.read())
+                  ^^^^^^^^^
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python312\Lib\encodings\cp1252.py", line 23, in decode
+    return codecs.charmap_decode(input,self.errors,decoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d in position 2364: character maps to <undefined>
+[17:25:16]     Attack on Titan: EXCEPTION 'NoneType' object has no attribute 'lower'
+[17:25:22] CASE anikoto :: Demon Slayer (2019 mid)
+[17:25:30]     Demon Slayer: label=None V=True A=1 S=1 decode=OK problems=0
+[17:25:36] CASE anikoto :: Frieren (2023 recent)
+[17:25:47]     Frieren: label=None V=True A=1 S=1 decode=OK problems=0
+[17:25:53] CASE anikoto :: Solo Leveling (2024 recent)
+[17:26:00]     Solo Leveling: label=None V=True A=1 S=1 decode=OK problems=0
+[17:26:06] === DONE ===

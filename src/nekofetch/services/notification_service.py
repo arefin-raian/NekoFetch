@@ -26,25 +26,25 @@ class NotificationService:
     async def download_complete(self, user_id: int, anime_title: str, request_code: str) -> None:
         await self._send(
             user_id,
-            f"<blockquote><b>✅ ᴅᴏᴡɴʟᴏᴀᴅ ᴄᴏᴍᴘʟᴇᴛᴇ</b></blockquote>\n\n"
+            f"<blockquote><b>✅ download complete</b></blockquote>\n\n"
             f"<blockquote expandable>"
-            f"<b>ᴀɴɪᴍᴇ:</b> <code>{anime_title}</code>\n"
-            f"<b>ʀᴇǫᴜᴇsᴛ:</b> <code>#{request_code}</code>\n\n"
-            f"ᴅᴏᴡɴʟᴏᴀᴅ ꜰɪɴɪsʜᴇᴅ! ɪᴛ's ɴᴏᴡ ʙᴇɪɴɢ ᴘʀᴏᴄᴇssᴇᴅ."
+            f"<b>anime:</b> {anime_title}\n"
+            f"<b>request:</b> <code>#{request_code}</code>\n\n"
+            f"download finished! it's now being processed."
             f"</blockquote>"
         )
 
     async def processing_complete(self, user_id: int, anime_title: str, request_code: str, needs_approval: bool = False) -> None:
         body = (
-            f"ᴘʀᴏᴄᴇssɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇ! "
-            f"{'ɪᴛs ᴀᴡᴀɪᴛɪɴɢ sᴛᴀꜰꜰ ᴀᴘᴘʀᴏᴠᴀʟ.' if needs_approval else 'ᴄʜᴇᴄᴋ ᴛʜᴇ ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛ ᴛᴏ ᴀᴄᴄᴇss ʏᴏᴜʀ ꜰɪʟᴇs.'}"
+            f"processing complete! "
+            f"{'its awaiting staff approval.' if needs_approval else 'check the distribution bot to access your files.'}"
         )
         await self._send(
             user_id,
-            f"<blockquote><b>📦 ᴄᴏɴᴛᴇɴᴛ ʀᴇᴀᴅʏ</b></blockquote>\n\n"
+            f"<blockquote><b>📦 content ready</b></blockquote>\n\n"
             f"<blockquote expandable>"
-            f"<b>ᴀɴɪᴍᴇ:</b> <code>{anime_title}</code>\n"
-            f"<b>ʀᴇǫᴜᴇsᴛ:</b> <code>#{request_code}</code>\n\n"
+            f"<b>anime:</b> {anime_title}\n"
+            f"<b>request:</b> <code>#{request_code}</code>\n\n"
             f"{body}"
             f"</blockquote>"
         )
@@ -53,11 +53,11 @@ class NotificationService:
         display_error = error[:200] + "…" if len(error) > 200 else error
         await self._send(
             user_id,
-            f"<blockquote><b>⚙️ ᴘʀᴏᴄᴇssɪɴɢ ꜰᴀɪʟᴇᴅ</b></blockquote>\n\n"
+            f"<blockquote><b>⚙️ processing failed</b></blockquote>\n\n"
             f"<blockquote expandable>"
-            f"<b>ᴀɴɪᴍᴇ:</b> <code>{anime_title}</code>\n"
-            f"<b>ʀᴇǫᴜᴇsᴛ:</b> <code>#{request_code}</code>\n\n"
-            f"ᴛʜᴇ ᴅᴏᴡɴʟᴏᴀᴅ ꜰɪɴɪsʜᴇᴅ ʙᴜᴛ ᴘʀᴏᴄᴇssɪɴɢ ᴇɴᴄᴏᴜɴᴛᴇʀᴇᴅ ᴀɴ ᴇʀʀᴏʀ. ᴘʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ sᴛᴀꜰꜰ.\n\n"
+            f"<b>anime:</b> {anime_title}\n"
+            f"<b>request:</b> <code>#{request_code}</code>\n\n"
+            f"the download finished but processing encountered an error. please contact staff.\n\n"
             f"<code>{display_error}</code>"
             f"</blockquote>"
         )
@@ -66,11 +66,11 @@ class NotificationService:
         display_error = error[:200] + "…" if len(error) > 200 else error
         await self._send(
             user_id,
-            f"<blockquote><b>❌ ᴅᴏᴡɴʟᴏᴀᴅ ꜰᴀɪʟᴇᴅ</b></blockquote>\n\n"
+            f"<blockquote><b>❌ download failed</b></blockquote>\n\n"
             f"<blockquote expandable>"
-            f"<b>ᴀɴɪᴍᴇ:</b> <code>{anime_title}</code>\n"
-            f"<b>ʀᴇǫᴜᴇsᴛ:</b> <code>#{request_code}</code>\n\n"
-            f"sᴏᴍᴇᴛʜɪɴɢ ᴡᴇɴᴛ ᴡʀᴏɴɢ ᴅᴜʀɪɴɢ ᴅᴏᴡɴʟᴏᴀᴅ. ᴘʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ sᴛᴀꜰꜰ.\n\n"
+            f"<b>anime:</b> {anime_title}\n"
+            f"<b>request:</b> <code>#{request_code}</code>\n\n"
+            f"something went wrong during download. please contact staff.\n\n"
             f"<code>{display_error}</code>"
             f"</blockquote>"
         )
@@ -78,22 +78,22 @@ class NotificationService:
     async def request_published(self, user_id: int, anime_title: str, request_code: str) -> None:
         await self._send(
             user_id,
-            f"<blockquote><b>🎉 ᴄᴏɴᴛᴇɴᴛ ᴘᴜʙʟɪsʜᴇᴅ!</b></blockquote>\n\n"
+            f"<blockquote><b>🎉 content published!</b></blockquote>\n\n"
             f"<blockquote expandable>"
-            f"<b>ᴀɴɪᴍᴇ:</b> <code>{anime_title}</code>\n"
-            f"<b>ʀᴇǫᴜᴇsᴛ:</b> <code>#{request_code}</code>\n\n"
-            f"ʏᴏᴜʀ ᴄᴏɴᴛᴇɴᴛ ɪs ɴᴏᴡ ʟɪᴠᴇ! ᴏᴘᴇɴ ᴛʜᴇ ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛ ᴀɴᴅ sᴇᴀʀᴄʜ ꜰᴏʀ ɪᴛ."
+            f"<b>anime:</b> {anime_title}\n"
+            f"<b>request:</b> <code>#{request_code}</code>\n\n"
+            f"your content is now live! open the distribution bot and search for it."
             f"</blockquote>"
         )
 
     async def processing_stage_warning(self, user_id: int, anime_title: str, stage: str, note: str) -> None:
         await self._send(
             user_id,
-            f"<blockquote><b>⚠️ ᴘʀᴏᴄᴇssɪɴɢ ᴡᴀʀɴɪɴɢ</b></blockquote>\n\n"
+            f"<blockquote><b>⚠️ processing warning</b></blockquote>\n\n"
             f"<blockquote expandable>"
-            f"<b>ᴀɴɪᴍᴇ:</b> <code>{anime_title}</code>\n"
-            f"<b>sᴛᴀɢᴇ:</b> <code>{stage}</code>\n"
-            f"<b>ɴᴏᴛᴇ:</b> <code>{note}</code>\n\n"
-            f"ᴛʜɪs ɪs ᴀ ɴᴏɴ-ꜰᴀᴛᴀʟ ᴡᴀʀɴɪɴɢ. ᴘʀᴏᴄᴇssɪɴɢ ᴡɪʟʟ ᴄᴏɴᴛɪɴᴜᴇ."
+            f"<b>anime:</b> {anime_title}\n"
+            f"<b>stage:</b> {stage}\n"
+            f"<b>note:</b> {note}\n\n"
+            f"this is a non-fatal warning. processing will continue."
             f"</blockquote>"
         )

@@ -117,11 +117,11 @@ class BotManager:
                 log.debug("bots.channel.retry_pending", channel=name, id=cid, attempt=attempt)
         log.warning("bots.channel.retry_exhausted", channel=name, id=cid)
         await self._alert_admin(
-            f"❌ <b>ᴄʜᴀɴɴᴇʟ ʀᴇᴛʀʏ ᴇxʜᴀᴜsᴛᴇᴅ!</b>\n\n"
-            f"<b>ᴄʜᴀɴɴᴇʟ:</b> <code>{name}</code>\n"
-            f"<b>ɪᴅ:</b> <code>{cid}</code>\n\n"
-            f"ᴄᴏᴜʟᴅ ɴᴏᴛ ʀᴇsᴏʟᴠᴇ ᴄʜᴀɴɴᴇʟ ᴘᴇᴇʀ ᴀꜰᴛᴇʀ {_RESOLVE_MAX_RETRIES} ᴀᴛᴛᴇᴍᴘᴛs. "
-            f"ᴍᴀᴋᴇ sᴜʀᴇ ᴛʜᴇ ʙᴏᴛ ɪs ᴀɴ ᴀᴅᴍɪɴ ᴏꜰ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ ᴀɴᴅ ᴛʜᴀᴛ ᴀ ᴍᴇssᴀɢᴇ ʜᴀs ʙᴇᴇɴ ᴘᴏsᴛᴇᴅ."
+            f"❌ <b>channel retry exhausted!</b>\n\n"
+            f"<b>channel:</b> {name}\n"
+            f"<b>id:</b> <code>{cid}</code>\n\n"
+            f"could not resolve channel peer after {_RESOLVE_MAX_RETRIES} attempts. "
+            f"make sure the bot is an admin of the channel and that a message has been posted."
         )
 
     async def _publish_commands(self, client, *, kind: str) -> None:
@@ -194,12 +194,12 @@ class BotManager:
                 log.info("bots.distribution.started", bot=row.name, id=row.id)
             except Exception as exc:  # one bad token must not stop the fleet
                 log.error("bots.distribution.failed", id=row.id, error=str(exc))
-            await self._alert_admin(
-                f"⚠️ <b>ᴅɪsᴛʀɪʙᴜᴛɪᴏɴ ʙᴏᴛ ꜰᴀɪʟᴇᴅ ᴛᴏ sᴛᴀʀᴛ</b>\n\n"
-                f"<b>ɪᴅ:</b> <code>{row.id}</code>\n"
-                f"<b>ɴᴀᴍᴇ:</b> <code>{row.name}</code>\n"
-                f"<b>ᴇʀʀᴏʀ:</b> <code>{str(exc)[:200]}</code>"
-            )
+                await self._alert_admin(
+                    f"⚠️ <b>distribution bot failed to start</b>\n\n"
+                    f"<b>id:</b> <code>{row.id}</code>\n"
+                    f"<b>name:</b> {row.name}\n"
+                    f"<b>error:</b> {str(exc)[:200]}"
+                )
 
     def get_client(self, bot_id: int):
         """Return the running Pyrogram client for a distribution bot, if any."""

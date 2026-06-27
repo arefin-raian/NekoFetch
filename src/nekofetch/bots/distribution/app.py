@@ -15,12 +15,12 @@ from nekofetch.infrastructure.database.postgres.models import DistributionBot
 from nekofetch.services.distribution_service import DistributionService
 from nekofetch.ui.components import cb, keyboard, parse_cb
 from nekofetch.ui.progress import loading_animation, staged_loading
-from nekofetch.ui.typography import bq, bqx, small_caps
+from nekofetch.ui.typography import bq, bqx
 
 _AUDIO_LABELS = {
-    AudioType.SUBBED.value: "sᴜʙʙᴇᴅ",
-    AudioType.DUBBED.value: "ᴅᴜʙʙᴇᴅ",
-    AudioType.DUAL_AUDIO.value: "ᴅᴜᴀʟ ᴀᴜᴅɪᴏ",
+    AudioType.SUBBED.value: "subbed",
+    AudioType.DUBBED.value: "dubbed",
+    AudioType.DUAL_AUDIO.value: "dual audio",
 }
 
 DISTRIBUTION_COMMANDS = [
@@ -58,11 +58,11 @@ def build_distribution_bot(
         )
 
         msg = await message.reply(
-            "<code>ᴄᴏɴɴᴇᴄᴛɪɴɢ!</code>", parse_mode=ParseMode.HTML
+            "<b>connecting!</b>", parse_mode=ParseMode.HTML
         )
         await staged_loading(
             msg,
-            ["ᴄᴏɴɴᴇᴄᴛɪɴɢ", "ᴄʜᴇᴄᴋɪɴɢ ᴀᴄᴄᴇss", "ᴘʀᴇᴘᴀʀɪɴɢ"],
+            ["connecting", "checking access", "preparing"],
             delay_per_stage=ui_cfg.loading_dot_delay * 3,
         )
 
@@ -89,10 +89,10 @@ def build_distribution_bot(
     @client.on_message(filters.command("help"))
     async def _help(_: Client, message: Message) -> None:
         await message.reply(
-            f"{bq('<b>ʜᴏᴡ ɪᴛ ᴡᴏʀᴋs</b>')}\n\n"
-            f"{bqx('<b>◆ /start</b> — ʙʀᴏᴡsᴇ ᴛʜᴇ ʟɪʙʀᴀʀʏ ᴏʀ ᴏᴘᴇɴ ᴀ ᴛɪᴛʟᴇ\n'
-                   '<b>◆</b> ᴘɪᴄᴋ ᴀ sᴇᴀsᴏɴ → ʀᴇsᴏʟᴜᴛɪᴏɴ → ʟᴀɴɢᴜᴀɢᴇ\n'
-                   '<b>◆</b> ᴛᴀᴘ ɢᴇᴛ sᴇᴀsᴏɴ ᴘᴀᴄᴋᴀɢᴇ ᴛᴏ ʀᴇᴄᴇɪᴠᴇ ʏᴏᴜʀ ꜰɪʟᴇs')}",
+            f"{bq('<b>how it works</b>')}\n\n"
+            f"{bqx('<b>◆ /start</b> — browse the library or open a title\n'
+                   '<b>◆</b> pick a season → resolution → language\n'
+                   '<b>◆</b> tap get season package to receive your files')}",
             parse_mode=ParseMode.HTML,
         )
 
@@ -116,9 +116,9 @@ def build_distribution_bot(
         if status.has_access:
             return True
         await message.reply(
-            f"{bq('<b>ᴀᴄᴄᴇss ʀᴇǫᴜɪʀᴇᴅ</b>')}\n\n"
-            f"{bq('ʏᴏᴜʀ ᴀᴄᴄᴇss ʜᴀs ᴇxᴘɪʀᴇᴅ. ᴛᴀᴘ ʙᴇʟᴏᴡ ᴛᴏ ɢᴇᴛ ᴀ ɴᴇᴡ ᴀᴄᴄᴇss ᴛᴏᴋᴇɴ.')}",
-            reply_markup=keyboard([("➜ ɢᴇᴛ ᴀᴄᴄᴇss", cb("acc", "get"))]),
+            f"{bq('<b>access required</b>')}\n\n"
+            f"{bq('your access has expired. tap below to get a new access token.')}",
+            reply_markup=keyboard([("➜ get access", cb("acc", "get"))]),
             parse_mode=ParseMode.HTML,
         )
         return False
@@ -129,7 +129,7 @@ def build_distribution_bot(
         try:
             until = await AccessService(container).redeem(token, message.from_user.id)
             await message.reply(
-                bq(f"✓ ᴀᴄᴄᴇss ɢʀᴀɴᴛᴇᴅ ᴜɴᴛɪʟ <code>{until:%Y-%m-%d %H:%M} UTC</code>."),
+                bq(f"✓ access granted until <code>{until:%Y-%m-%d %H:%M} UTC</code>."),
                 parse_mode=ParseMode.HTML,
             )
         except NekoFetchError as exc:
@@ -146,16 +146,16 @@ def build_distribution_bot(
         username = await _bot_username(q.message)
         if not username:
             await q.message.reply(
-                bq("ᴄᴏᴜʟᴅɴ'ᴛ ʙᴜɪʟᴅ ᴀɴ ᴀᴄᴄᴇss ʟɪɴᴋ ʀɪɢʜᴛ ɴᴏᴡ. ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ."),
+                bq("couldn't build an access link right now. try again later."),
                 parse_mode=ParseMode.HTML,
             )
             return
         url = await AccessService(container).generate_token(q.from_user.id, bot_username=username)
         days = container.config.access.token_days
         await q.message.reply(
-            f"{bq(f'<b>ɢᴇᴛ {days} ᴅᴀʏs ᴀᴄᴄᴇss</b>')}\n\n"
-            f"{bq(f'ᴄᴏᴍᴘʟᴇᴛᴇ ᴛʜɪs ʟɪɴᴋ, ᴛʜᴇɴ ʏᴏᴜ\'ʟʟ ʀᴇᴛᴜʀɴ ᴛᴏ ᴛʜᴇ ʙᴏᴛ '
-                 f'ᴡɪᴛʜ ᴀᴄᴄᴇss ᴜɴʟᴏᴄᴋᴇᴅ:\\n{url}')}",
+            f"{bq(f'<b>get {days} days access</b>')}\n\n"
+            f"{bq(f'complete this link, then you\'ll return to the bot '
+                 f'with access unlocked:\\n{url}')}",
             parse_mode=ParseMode.HTML,
         )
 
@@ -165,9 +165,9 @@ def build_distribution_bot(
         pending = await channels_to_join(client, container, message.from_user.id)
         if not pending:
             return True
-        join_msg = "ᴘʟᴇᴀsᴇ ᴊᴏɪɴ ᴛʜᴇ ᴄʜᴀɴɴᴇʟ(s) ʙᴇʟᴏᴡ, ᴛʜᴇɴ ᴛᴀᴘ ɪ ᴠᴇ ᴊᴏɪɴᴇᴅ."
+        join_msg = "please join the channel(s) below, then tap i ve joined."
         await message.reply(
-            f"{bq('<b>ᴊᴏɪɴ ʀᴇǫᴜɪʀᴇᴅ</b>')}\n\n"
+            f"{bq('<b>join required</b>')}\n\n"
             f"{bq(join_msg)}",
             reply_markup=join_keyboard(pending, retry_callback="fsub|retry"),
             parse_mode=ParseMode.HTML,
@@ -180,9 +180,9 @@ def build_distribution_bot(
 
         pending = await channels_to_join(client, container, q.from_user.id)
         if pending:
-            await q.answer("sᴛɪʟʟ ɴᴏᴛ sᴜʙsᴄʀɪʙᴇᴅ ᴛᴏ ᴀʟʟ ᴄʜᴀɴɴᴇʟs.", show_alert=True)
+            await q.answer("still not subscribed to all channels.", show_alert=True)
             return
-        await q.answer("ᴛʜᴀɴᴋs!")
+        await q.answer("thanks!")
         await q.message.delete()
         if record.anime_doc_id:
             await _show_title(q.message, record.anime_doc_id)
@@ -191,13 +191,13 @@ def build_distribution_bot(
 
     async def _show_catalog(message: Message) -> None:
         msg = await message.reply(
-            "<code>ʟᴏᴀᴅɪɴɢ ᴄᴀᴛᴀʟᴏɢ!</code>", parse_mode=ParseMode.HTML
+            "<b>loading catalog!</b>", parse_mode=ParseMode.HTML
         )
-        await loading_animation(msg, "ʟᴏᴀᴅɪɴɢ ᴄᴀᴛᴀʟᴏɢ")
+        await loading_animation(msg, "loading catalog")
         titles = await dist.published_titles()
         if not titles:
             await msg.edit_text(
-                f"{bq(f'<b>{record.name}</b>')}\n\n{bq('ɴᴏ ᴄᴏɴᴛᴇɴᴛ ᴘᴜʙʟɪsʜᴇᴅ ʏᴇᴛ.')}",
+                f"{bq(f'<b>{record.name}</b>')}\n\n{bq('no content published yet.')}",
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -205,7 +205,7 @@ def build_distribution_bot(
         await fsm.set(message.from_user.id, "browse", titles=cache)
         rows = [[(t["title"], cb("d", "title", i))] for i, t in enumerate(cache)]
         await msg.edit_text(
-            f"{bq(f'<b>{record.name}</b>')}\n\n{bq('ᴄʜᴏᴏsᴇ ᴀ ᴛɪᴛʟᴇ:')}",
+            f"{bq(f'<b>{record.name}</b>')}\n\n{bq('choose a title:')}",
             reply_markup=keyboard(*rows),
             parse_mode=ParseMode.HTML,
         )
@@ -217,7 +217,7 @@ def build_distribution_bot(
         cache = data.get("titles", [])
         idx = int(args[1])
         if idx >= len(cache):
-            await q.answer("ᴜɴᴀᴠᴀɪʟᴀʙʟᴇ", show_alert=True)
+            await q.answer("unavailable", show_alert=True)
             return
         await q.answer()
         await _show_title(q.message, cache[idx]["id"], edit=True, title=cache[idx]["title"])
@@ -229,16 +229,16 @@ def build_distribution_bot(
 
         msg = message
         if edit:
-            await loading_animation(msg, "ʟᴏᴀᴅɪɴɢ ᴀɴɪᴍᴇ")
+            await loading_animation(msg, "loading anime")
         else:
             msg = await message.reply(
-                "<code>ʟᴏᴀᴅɪɴɢ ᴀɴɪᴍᴇ!</code>", parse_mode=ParseMode.HTML
+                "<b>loading anime!</b>", parse_mode=ParseMode.HTML
             )
-            await loading_animation(msg, "ʟᴏᴀᴅɪɴɢ ᴀɴɪᴍᴇ")
+            await loading_animation(msg, "loading anime")
 
         seasons = await dist.seasons_for(anime_doc_id)
-        rows = [[(f"sᴇᴀsᴏɴ {s}", cb("d", "season", s))] for s in seasons] or \
-               [[("ɴᴏ ᴘᴜʙʟɪsʜᴇᴅ sᴇᴀsᴏɴs", cb("noop"))]]
+        rows = [[(f"season {s}", cb("d", "season", s))] for s in seasons] or \
+               [[("no published seasons", cb("noop"))]]
 
         card = await EnrichmentService(container).render_card(
             anime_doc_id, anime_doc_id=anime_doc_id
@@ -263,8 +263,8 @@ def build_distribution_bot(
         if details and details.synopsis:
             body.append(details.synopsis[:400])
         if details and details.genres:
-            body.append(f"<b>ɢᴇɴʀᴇs:</b> {', '.join(details.genres)}")
-        body.append(f"<b>sᴇᴀsᴏɴs:</b> {len(seasons)}")
+            body.append(f"<b>genres:</b> {', '.join(details.genres)}")
+        body.append(f"<b>seasons:</b> {len(seasons)}")
         text = "\n\n".join(body)
         if edit:
             await msg.edit_text(text, reply_markup=keyboard(*rows), parse_mode=ParseMode.HTML)
@@ -293,17 +293,17 @@ def build_distribution_bot(
         season = int(args[1])
         _, data = await fsm.get(q.from_user.id)
         doc_id = data.get("doc_id")
-        await loading_animation(q.message, "ʀᴇᴛʀɪᴇᴠɪɴɢ sᴇᴀsᴏɴs")
+        await loading_animation(q.message, "retrieving seasons")
         variants = await dist.variants_for(doc_id, season)
         resolutions = sorted({r for r, _ in variants})
         await fsm.update(q.from_user.id, season=season, variants=variants)
         await q.answer()
         rows = [[(res, cb("d", "res", res))] for res in resolutions] or \
-               [[("ɴᴏ ʀᴇsᴏʟᴜᴛɪᴏɴs", cb("noop"))]]
+               [[("no resolutions", cb("noop"))]]
         cr = container.localizer.get("choose_resolution")
         await q.message.edit_text(
             f"{bq(f'<b>{cr}</b>')}\n\n"
-            f"{bq(f'sᴇᴀsᴏɴ {season}')}",
+            f"{bq(f'season {season}')}",
             reply_markup=keyboard(*rows),
             parse_mode=ParseMode.HTML,
         )
@@ -316,8 +316,8 @@ def build_distribution_bot(
         audios = sorted({a for r, a in data.get("variants", []) if r == res})
         await fsm.update(q.from_user.id, resolution=res)
         await q.answer()
-        rows = [[(_AUDIO_LABELS.get(a, small_caps(a.title())), cb("d", "lang", a))] for a in audios] or \
-               [[("ɴᴏ ʟᴀɴɢᴜᴀɢᴇs", cb("noop"))]]
+        rows = [[(_AUDIO_LABELS.get(a, a.title()), cb("d", "lang", a))] for a in audios] or \
+               [[("no languages", cb("noop"))]]
         cl = container.localizer.get("choose_language")
         await q.message.edit_text(
             f"{bq(f'<b>{cl}</b>')}\n\n"
@@ -350,12 +350,12 @@ def build_distribution_bot(
         aud_label = _AUDIO_LABELS.get(audio, audio)
         await q.message.edit_text(
             f"{bq(f'<b>{title}</b>')}\n\n"
-            f"{bqx(f'<b>◆ sᴇᴀsᴏɴ:</b> <code>{pkg.season}</code>\n'
-                   f'<b>◆ ᴇᴘɪsᴏᴅᴇs:</b> <code>{span}</code>\n'
-                   f'<b>◆ ʀᴇsᴏʟᴜᴛɪᴏɴ:</b> <code>{res}</code>\n'
-                   f'<b>◆ ʟᴀɴɢᴜᴀɢᴇ:</b> <code>{aud_label}</code>\n'
-                   f'<b>◆ ꜰɪʟᴇs:</b> <code>{len(pkg.file_ids)}</code>')}",
-            reply_markup=keyboard([("📦 ɢᴇᴛ sᴇᴀsᴏɴ ᴘᴀᴄᴋᴀɢᴇ", cb("d", "pkg"))]),
+            f"{bqx(f'<b>◆ season:</b> <code>{pkg.season}</code>\n'
+                   f'<b>◆ episodes:</b> {span}\n'
+                   f'<b>◆ resolution:</b> <code>{res}</code>\n'
+                   f'<b>◆ language:</b> {aud_label}\n'
+                   f'<b>◆ files:</b> {len(pkg.file_ids)}')}",
+            reply_markup=keyboard([("📦 get season package", cb("d", "pkg"))]),
             parse_mode=ParseMode.HTML,
         )
 
@@ -365,14 +365,14 @@ def build_distribution_bot(
         from nekofetch.services.log_channel_service import LogChannelService
         from nekofetch.services.storage_channel_service import StorageChannelService
 
-        await loading_animation(q.message, "ᴘʀᴇᴘᴀʀɪɴɢ ᴘᴀᴄᴋᴀɢᴇ")
+        await loading_animation(q.message, "preparing package")
 
         if not await AccessService(container).has_access(q.from_user.id):
             await q.answer()
             await q.message.reply(
-                f"{bq('<b>ᴀᴄᴄᴇss ʀᴇǫᴜɪʀᴇᴅ</b>')}\n\n"
-                f"{bq('ɢᴇᴛ ᴀɴ ᴀᴄᴄᴇss ᴛᴏᴋᴇɴ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ.')}",
-                reply_markup=keyboard([("➜ ɢᴇᴛ ᴀᴄᴄᴇss", cb("acc", "get"))]),
+                f"{bq('<b>access required</b>')}\n\n"
+                f"{bq('get an access token to download.')}",
+                reply_markup=keyboard([("➜ get access", cb("acc", "get"))]),
                 parse_mode=ParseMode.HTML,
             )
             return
@@ -406,24 +406,24 @@ def build_distribution_bot(
         if pack is not None:
             await q.message.reply(
                 f"{bq(f'<b>{title}</b>')}\n\n"
-                f"{bq(f'sᴇᴀsᴏɴ {pkg.season} — {pack.file_count} ꜰɪʟᴇs '
+                f"{bq(f'season {pkg.season} — {pack.file_count} files '
                      f'| {res} | {_AUDIO_LABELS.get(audio_val, audio_val)}')}",
                 parse_mode=ParseMode.HTML,
             )
-            await loading_animation(q.message, "sᴇɴᴅɪɴɢ")
+            await loading_animation(q.message, "sending")
             delivered_ids = await storage.deliver(pack, q.message.chat.id)
         else:
             link = await dist.create_access_link(pkg, user_id=q.from_user.id)
             expiry_note = (
-                f"\n\nᴛʜɪs ᴀᴄᴄᴇss ᴇxᴘɪʀᴇs ɪɴ {cfg.link_expiry_minutes} ᴍɪɴᴜᴛᴇs."
+                f"\n\nthis access expires in {cfg.link_expiry_minutes} minutes."
                 if link.expires_at else ""
             )
             sent = await client.send_message(
                 q.message.chat.id,
                 f"{bq(f'<b>{title}</b>')}\n\n"
-                f"{bq(f'sᴇᴀsᴏɴ {pkg.season} — {len(pkg.file_ids)} ꜰɪʟᴇs '
+                f"{bq(f'season {pkg.season} — {len(pkg.file_ids)} files '
                      f'| {res} | {_AUDIO_LABELS.get(audio_val, audio_val)}')}\n"
-                f"{bq(f'ᴀᴄᴄᴇss ᴛᴏᴋᴇɴ: <code>{link.token}</code>{expiry_note}')}",
+                f"{bq(f'access token: <code>{link.token}</code>{expiry_note}')}",
                 protect_content=cfg.protect_content,
                 parse_mode=ParseMode.HTML,
             )
@@ -442,11 +442,11 @@ def build_distribution_bot(
             and scheduler is not None and delivered_ids
         )
         if auto_delete_on or container.config.access.forward_to_saved_hint:
-            hint_parts = [bq("ꜰᴏʀᴡᴀʀᴅ ᴛʜᴇsᴇ ꜰɪʟᴇs ᴛᴏ ʏᴏᴜʀ <b>sᴀᴠᴇᴅ ᴍᴇssᴀɢᴇs</b> ᴛᴏ ᴋᴇᴇᴘ ᴛʜᴇᴍ.")]
+            hint_parts = [bq("forward these files to your <b>saved messages</b> to keep them.")]
             if auto_delete_on:
                 hint_parts.append(
-                    bq(f"ᴛʜᴇʏ'ʟʟ ʙᴇ ᴀᴜᴛᴏ-ᴅᴇʟᴇᴛᴇᴅ ʜᴇʀᴇ ɪɴ "
-                       f"<code>{cfg.auto_delete_after_minutes}</code> ᴍɪɴᴜᴛᴇs.")
+                    bq(f"they'll be auto-deleted here in "
+                       f"{cfg.auto_delete_after_minutes} minutes.")
                 )
             await q.message.reply(
                 "\n\n".join(hint_parts),

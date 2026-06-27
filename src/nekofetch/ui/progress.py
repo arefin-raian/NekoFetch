@@ -22,14 +22,14 @@ def labeled(label: str, percent: float, *, width: int = 10) -> str:
 def labeled_html(label: str, percent: float, *, width: int = 10) -> str:
     return (
         f"<blockquote><b>{label}</b>\n\n"
-        f"<code>{bar(percent, width=width)}</code></blockquote>"
+        f"<b>{bar(percent, width=width)}</b></blockquote>"
     )
 
 
 async def loading_animation(msg: Message, label: str, steps: int = 3, delay: float = 0.35) -> None:
     for i in range(1, steps + 1):
         try:
-            await msg.edit_text(f"<code>{label}{'!' * i}</code>",         parse_mode=ParseMode.HTML)
+            await msg.edit_text(f"<b>{label}{'!' * i}</b>", parse_mode=ParseMode.HTML)
         except MessageNotModified:
             pass
         await asyncio.sleep(delay)
@@ -39,7 +39,7 @@ async def staged_loading(msg: Message, stages: list[str], delay_per_stage: float
     for stage in stages:
         for dots in range(1, 4):
             try:
-                await msg.edit_text(f"<code>{stage}{'!' * dots}</code>",         parse_mode=ParseMode.HTML)
+                await msg.edit_text(f"<b>{stage}{'!' * dots}</b>", parse_mode=ParseMode.HTML)
             except MessageNotModified:
                 pass
             await asyncio.sleep(delay_per_stage / 3)
@@ -58,20 +58,21 @@ def queue_block_html(
     job_id: int | None = None,
 ) -> str:
     bar_str = bar(progress)
-    ep_line = f"\n<b>ᴇᴘɪsᴏᴅᴇ:</b> <code>S{current_episode:02d}</code>" if current_episode else ""
+    ep_line = f"\n<b>episode:</b> <b>S{current_episode:02d}</b>" if current_episode else ""
     size_line = ""
     if total_bytes > 0:
-        size_line = f"\n<b>sɪᴢᴇ:</b> <code>{human_bytes(downloaded_bytes)} / {human_bytes(total_bytes)}</code>"
-    id_line = f"  <code>#{job_id}</code>" if job_id else ""
+        size_line = (f"\n<b>size:</b> {human_bytes(downloaded_bytes)} / "
+                     f"{human_bytes(total_bytes)}")
+    id_line = f"  #{job_id}" if job_id else ""
 
     return (
         f"<blockquote>"
         f"📥 <b>{anime_title}</b>{id_line}"
         f"{ep_line}\n"
-        f"<b>sᴛᴀᴛᴜs:</b> <code>{status}</code>\n"
-        f"<b>ᴘʀᴏɢʀᴇss:</b> <code>{bar_str}</code>\n"
-        f"<b>sᴘᴇᴇᴅ:</b> <code>{human_speed(speed_bps)}</code>\n"
-        f"<b>ᴇᴛᴀ:</b> <code>{human_eta(eta_seconds)}</code>"
+        f"<b>status:</b> {status}\n"
+        f"<b>progress:</b> <b>{bar_str}</b>\n"
+        f"<b>speed:</b> {human_speed(speed_bps)}\n"
+        f"<b>eta:</b> {human_eta(eta_seconds)}"
         f"{size_line}"
         f"</blockquote>"
     )

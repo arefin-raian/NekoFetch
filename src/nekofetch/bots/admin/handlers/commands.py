@@ -8,7 +8,7 @@ from nekofetch.bots.fsm import FSM
 from nekofetch.core.container import Container
 from nekofetch.domain.enums import Role
 from nekofetch.ui.components import cb, keyboard
-from nekofetch.ui.typography import bq, bqx, small_caps
+from nekofetch.ui.typography import bq, bqx
 
 ADMIN_COMMANDS = [
     BotCommand("start", "Open the main panel"),
@@ -32,33 +32,33 @@ def register(client: Client, container: Container) -> None:
     async def _help(_: Client, message: Message) -> None:
         role = _role(message)
         blocks = [
-            bq("<b>◆ /sᴛᴀʀᴛ</b> — ᴏᴘᴇɴ ᴛʜᴇ ᴍᴀɪɴ ᴘᴀɴᴇʟ"),
-            bq("<b>◆ /ʜᴇʟᴘ</b> — sʜᴏᴡ ᴛʜɪs ᴍᴇssᴀɢᴇ"),
-            bq("<b>◆ /ᴄᴀɴᴄᴇʟ</b> — ᴀʙᴏʀᴛ ᴡʜᴀᴛᴇᴠᴇʀ ʏᴏᴜ'ʀᴇ ɪɴ ᴛʜᴇ ᴍɪᴅᴅʟᴇ ᴏꜰ"),
+            bq("<b>◆ /start</b> — open the main panel"),
+            bq("<b>◆ /help</b> — show this message"),
+            bq("<b>◆ /cancel</b> — abort whatever you're in the middle of"),
         ]
         everyone_blocks = [
-            bq(f"<b>◆ ʀᴇǫᴜᴇsᴛ ᴀɴɪᴍᴇ</b> — sᴇᴀʀᴄʜ ᴀ ᴛɪᴛʟᴇ, ᴘɪᴄᴋ ᴀ sᴇᴀsᴏɴ/sᴄᴏᴘᴇ, sᴜʙᴍɪᴛ"),
-            bq(f"<b>◆ ᴍʏ ʀᴇǫᴜᴇsᴛs</b> — ᴛʀᴀᴄᴋ ᴛʜᴇ sᴛᴀᴛᴜs ᴏꜰ ᴡʜᴀᴛ ʏᴏᴜ ᴀsᴋᴇᴅ ꜰᴏʀ"),
+            bq(f"<b>◆ request anime</b> — search a title, pick a season/scope, submit"),
+            bq(f"<b>◆ my requests</b> — track the status of what you asked for"),
         ]
         text_blocks = [
-            bq("<b>ʜᴇʟᴘ</b>"),
-            bq("ᴍᴏsᴛ ᴏꜰ ᴛʜᴇ ʙᴏᴛ ɪs ʙᴜᴛᴛᴏɴ-ᴅʀɪᴠᴇɴ: sᴇɴᴅ /sᴛᴀʀᴛ ᴀɴᴅ ᴛᴀᴘ ʏᴏᴜʀ ᴡᴀʏ ᴛʜʀᴏᴜɢʜ."),
-            bq("<b>ᴄᴏᴍᴍᴀɴᴅs</b>"),
+            bq("<b>help</b>"),
+            bq("most of the bot is button-driven: send /start and tap your way through."),
+            bq("<b>commands</b>"),
             *blocks,
-            bq("<b>ᴇᴠᴇʀʏᴏɴᴇ ᴄᴀɴ</b>"),
+            bq("<b>everyone can</b>"),
             *everyone_blocks,
         ]
         if role in (Role.STAFF, Role.ADMIN):
             text_blocks.extend([
-                bq("<b>sᴛᴀꜰꜰ ᴄᴀɴ ᴀʟsᴏ</b>"),
-                bq("<b>◆ ʀᴇᴠɪᴇᴡ ʀᴇǫᴜᴇsᴛs</b> — ᴀᴘᴘʀᴏᴠᴇ ᴀ ᴘᴇɴᴅɪɴɢ ʀᴇǫᴜᴇsᴛ ɪɴᴛᴏ ᴛʜᴇ ǫᴜᴇᴜᴇ, ᴏʀ ʀᴇᴊᴇᴄᴛ ɪᴛ"),
-                bq("<b>◆ ᴅᴏᴡɴʟᴏᴀᴅs ǫᴜᴇᴜᴇ</b> — ᴡᴀᴛᴄʜ ʟɪᴠᴇ ᴅᴏᴡɴʟᴏᴀᴅ ᴘʀᴏɢʀᴇss"),
-                bq("<b>◆ ᴀᴘᴘʀᴏᴠᴀʟs</b> — ᴘᴜʙʟɪsʜ / ʀᴇᴘʀᴏᴄᴇss / ᴄᴀɴᴄᴇʟ ꜰɪɴɪsʜᴇᴅ ᴄᴏɴᴛᴇɴᴛ"),
+                bq("<b>staff can also</b>"),
+                bq("<b>◆ review requests</b> — approve a pending request into the queue, or reject it"),
+                bq("<b>◆ downloads queue</b> — watch live download progress"),
+                bq("<b>◆ approvals</b> — publish / reprocess / cancel finished content"),
             ])
         if role is Role.ADMIN:
             text_blocks.extend([
-                bq("<b>ᴀᴅᴍɪɴs ᴄᴀɴ ᴀʟsᴏ</b>"),
-                bq("<b>◆ ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ</b> — sᴇᴛᴛɪɴɢs · ᴀɴᴀʟʏᴛɪᴄs · sᴛᴀꜰꜰ · ʙᴏᴛs · sᴛᴏʀᴀɢᴇ · ʙʀᴏᴀᴅᴄᴀsᴛ"),
+                bq("<b>admins can also</b>"),
+                bq("<b>◆ admin panel</b> — settings · analytics · staff · bots · storage · broadcast"),
             ])
         await message.reply("\n\n".join(text_blocks), parse_mode=ParseMode.HTML)
 
@@ -66,6 +66,6 @@ def register(client: Client, container: Container) -> None:
     async def _cancel(_: Client, message: Message) -> None:
         await fsm.clear(message.from_user.id)
         await message.reply(
-            bq("ᴄᴀɴᴄᴇʟʟᴇᴅ. sᴇɴᴅ /sᴛᴀʀᴛ ᴛᴏ ᴏᴘᴇɴ ᴛʜᴇ ᴍᴇɴᴜ."),
+            bq("cancelled. send /start to open the menu."),
             parse_mode=ParseMode.HTML,
         )

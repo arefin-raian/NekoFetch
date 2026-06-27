@@ -71,9 +71,9 @@ class LogChannelService:
             return
         await self._clean_stale_pins()
         if self.cfg.pinned_dashboard:
-            await self._ensure_pin(_PIN_DASHBOARD, bq(heading("📊 ᴅᴀsʜʙᴏᴀʀᴅ") + "\n\nɪɴɪᴛɪᴀʟɪᴢɪɴɢ…"))
+            await self._ensure_pin(_PIN_DASHBOARD, bq(heading("📊 dashboard") + "\n\ninitializing…"))
         if self.cfg.pinned_catalog:
-            await self._ensure_pin(_PIN_CATALOG, bq(heading("📚 ᴄᴀᴛᴀʟᴏɢ") + "\n\nɪɴɪᴛɪᴀʟɪᴢɪɴɢ…"))
+            await self._ensure_pin(_PIN_CATALOG, bq(heading("📚 catalog") + "\n\ninitializing…"))
         await self.refresh()
 
     async def _clean_stale_pins(self) -> None:
@@ -140,14 +140,14 @@ class LogChannelService:
             f"  {i + 1}. <b>{t}</b> ({c})" for i, (t, c) in enumerate(s.most_requested)
         ) or "  —"
         return bq(
-            heading("📊 ɴᴇᴋᴏꜰᴇᴛᴄʜ — ʟɪᴠᴇ ᴅᴀsʜʙᴏᴀʀᴅ")
+            heading("📊 nekofetch — live dashboard")
             + f"\n<code>{ts}</code>\n\n"
-            + f"{DIAMOND_FILLED} ᴛᴏᴛᴀʟ ᴜsᴇʀs: <code>{s.total_users}</code>\n"
-            + f"{DIAMOND_FILLED} ᴛᴏᴛᴀʟ ᴅᴏᴡɴʟᴏᴀᴅs: <code>{s.total_downloads}</code>\n"
-            + f"{DIAMOND_FILLED} ǫᴜᴇᴜᴇ sɪᴢᴇ: <code>{s.queue_size}</code>\n"
-            + f"{DIAMOND_FILLED} ꜰᴀɪʟᴇᴅ ᴛᴀsᴋs: <code>{s.failed_tasks}</code>\n"
-            + f"{DIAMOND_FILLED} ᴘᴜʙʟɪsʜᴇᴅ: <code>{s.published}</code>\n\n"
-            + f"{TRIANGLE} <b>ᴍᴏsᴛ ʀᴇǫᴜᴇsᴛᴇᴅ</b>:\n{top}"
+            + f"{DIAMOND_FILLED} total users: <b>{s.total_users}</b>\n"
+            + f"{DIAMOND_FILLED} total downloads: <b>{s.total_downloads}</b>\n"
+            + f"{DIAMOND_FILLED} queue size: <b>{s.queue_size}</b>\n"
+            + f"{DIAMOND_FILLED} failed tasks: <b>{s.failed_tasks}</b>\n"
+            + f"{DIAMOND_FILLED} published: <b>{s.published}</b>\n\n"
+            + f"{TRIANGLE} <b>most requested</b>:\n{top}"
         )
 
     async def _catalog_text(self) -> str:
@@ -158,8 +158,8 @@ class LogChannelService:
         ts = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
         if not titles:
             return bq(
-                heading("📚 ᴄᴀᴛᴀʟᴏɢ")
-                + f"\n<code>{ts}</code>\n\nɴᴏ ᴘᴜʙʟɪsʜᴇᴅ ᴄᴏɴᴛᴇɴᴛ ʏᴇᴛ."
+                heading("📚 catalog")
+                + f"\n<code>{ts}</code>\n\nno published content yet."
             )
         lines = []
         for doc_id, title in titles[:40]:
@@ -167,7 +167,7 @@ class LogChannelService:
             season_str = ", ".join(f"S{s}" for s in seasons) or "—"
             lines.append(f"{DIAMOND_FILLED} {title}  {ARROW}  {season_str}")
         return bq(
-            heading(f"📚 ᴄᴀᴛᴀʟᴏɢ ({len(titles)})")
+            heading(f"📚 catalog ({len(titles)})")
             + f"\n<code>{ts}</code>\n\n"
             + "\n".join(lines)
         )

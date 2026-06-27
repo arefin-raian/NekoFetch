@@ -12,7 +12,7 @@ from nekofetch.services.auth_service import AuthService
 from nekofetch.ui import progress
 from nekofetch.ui.components import cb, keyboard
 from nekofetch.ui.progress import loading_animation
-from nekofetch.ui.typography import bq, bqx, small_caps
+from nekofetch.ui.typography import bq, bqx
 
 
 def register(client: Client, container: Container) -> None:
@@ -30,8 +30,8 @@ def register(client: Client, container: Container) -> None:
             return
         await q.answer()
         await q.message.edit_text(
-            f"{bq('<b>ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ</b>')}\n\n"
-            f"{bqx('ʜᴇʀᴇ ʏᴏᴜ ᴄᴀɴ ᴍᴀɴᴀɢᴇ ᴅᴏᴡɴʟᴏᴀᴅs, ᴀᴘᴘʀᴏᴠᴀʟs, sᴛᴀꜰꜰ, ᴀɴᴅ sᴇᴛᴛɪɴɢs.')}",
+            f"{bq('<b>admin panel</b>')}\n\n"
+            f"{bqx('here you can manage downloads, approvals, staff, and settings.')}",
             reply_markup=admin_home_keyboard(),
             parse_mode=ParseMode.HTML,
         )
@@ -47,18 +47,18 @@ def register(client: Client, container: Container) -> None:
     async def _render_settings(q: CallbackQuery) -> None:
         from nekofetch.services.settings_service import SettingsService
 
-        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ sᴇᴛᴛɪɴɢs")
+        await loading_animation(q.message, "loading settings")
         features = SettingsService(container).feature_map()
         rows = []
         for name, on in features.items():
             glyph = DIAMOND_FILLED if on else DIAMOND_HOLLOW
-            label = f"{glyph} {small_caps(name.replace('_', ' ').title())}"
+            label = f"{glyph} {name.replace('_', ' ').title()}"
             rows.append([(label, cb("settings", "toggle", name))])
-        rows.append([("← ʙᴀᴄᴋ", cb("admin", "home"))])
+        rows.append([("← back", cb("admin", "home"))])
         await q.message.edit_text(
-            f"{bq('<b>▸ ꜰᴇᴀᴛᴜʀᴇ sᴇᴛᴛɪɴɢs</b>')}\n\n"
-            f"{bq(f'{DIAMOND_FILLED} ᴇɴᴀʙʟᴅ   {DIAMOND_HOLLOW} ᴅɪsᴀʙʟᴇᴅ')}\n\n"
-            f"{bq('ᴛᴀᴘ ᴛᴏ ᴛᴏɢɢʟᴇ. ᴄʜᴀɴɢᴇs ᴀᴘᴘʟʏ ɪᴍᴍᴇᴅɪᴀᴛᴇʟʏ.')}",
+            f"{bq('<b>▸ feature settings</b>')}\n\n"
+            f"{bq(f'{DIAMOND_FILLED} enabld   {DIAMOND_HOLLOW} disabled')}\n\n"
+            f"{bq('tap to toggle. changes apply immediately.')}",
             reply_markup=keyboard(*rows),
             parse_mode=ParseMode.HTML,
         )
@@ -72,7 +72,7 @@ def register(client: Client, container: Container) -> None:
 
         feature = q.data.split("|", 2)[2]
         new_val = await SettingsService(container).toggle_feature(feature)
-        await q.answer(small_caps(f"{feature} {'on' if new_val else 'off'}"))
+        await q.answer(f"{feature} {'on' if new_val else 'off'}")
         await _render_settings(q)
 
     @client.on_callback_query(filters.regex(r"^queue\|view"))
@@ -82,7 +82,7 @@ def register(client: Client, container: Container) -> None:
             return
         from nekofetch.services.queue_service import QueueService
 
-        await loading_animation(q.message, "ʟᴏᴀᴅɪɴɢ ǫᴜᴇᴜᴇ")
+        await loading_animation(q.message, "loading queue")
         await q.answer()
         rows = await QueueService(container).dashboard()
         qt = L("queue_title")
@@ -110,8 +110,8 @@ def register(client: Client, container: Container) -> None:
             )
         await q.message.edit_text(
             f"{bq(f'<b>{qt}</b>')}\n\n" + "\n\n".join(blocks),
-            reply_markup=keyboard([("⟳ ʀᴇꜰʀᴇsʜ", cb("queue", "view", 0)),
-                                   ("← ʙᴀᴄᴋ", cb("admin", "home"))]),
+            reply_markup=keyboard([("⟳ refresh", cb("queue", "view", 0)),
+                                   ("← back", cb("admin", "home"))]),
             parse_mode=ParseMode.HTML,
         )
 
@@ -122,18 +122,18 @@ def register(client: Client, container: Container) -> None:
             return
         from nekofetch.services.analytics_service import AnalyticsService
 
-        await loading_animation(q.message, "ꜰᴇᴛᴄʜɪɴɢ sᴛᴀᴛs")
+        await loading_animation(q.message, "fetching stats")
         await q.answer()
         s = await AnalyticsService(container).dashboard()
         top = "\n".join(f"  {i + 1}. {t} ({c})" for i, (t, c) in enumerate(s.most_requested)) or "  —"
         await q.message.edit_text(
-            f"{bq('<b>▸ ᴀɴᴀʟʏᴛɪᴄs</b>')}\n\n"
-            f"{bq(f'<b>{DIAMOND_FILLED} ᴛᴏᴛᴀʟ ᴜsᴇʀs:</b> <code>{s.total_users}</code>')}\n"
-            f"{bq(f'<b>{DIAMOND_FILLED} ᴛᴏᴛᴀʟ ᴅᴏᴡɴʟᴏᴀᴅs:</b> <code>{s.total_downloads}</code>')}\n"
-            f"{bq(f'<b>{DIAMOND_FILLED} ǫᴜᴇᴜᴇ sɪᴢᴇ:</b> <code>{s.queue_size}</code>')}\n"
-            f"{bq(f'<b>{DIAMOND_FILLED} ꜰᴀɪʟᴇᴅ ᴛᴀsᴋs:</b> <code>{s.failed_tasks}</code>')}\n"
-            f"{bq(f'<b>{DIAMOND_FILLED} ᴘᴜʙʟɪsʜᴇᴅ:</b> <code>{s.published}</code>')}\n\n"
-            f"{bq(f'<b>ᴍᴏsᴛ ʀᴇǫᴜᴇsᴛᴇᴅ:</b>\n{top}')}",
-            reply_markup=keyboard([("← ʙᴀᴄᴋ", cb("admin", "home"))]),
+            f"{bq('<b>▸ analytics</b>')}\n\n"
+            f"{bq(f'<b>{DIAMOND_FILLED} total users:</b> {s.total_users}')}\n"
+            f"{bq(f'<b>{DIAMOND_FILLED} total downloads:</b> {s.total_downloads}')}\n"
+            f"{bq(f'<b>{DIAMOND_FILLED} queue size:</b> {s.queue_size}')}\n"
+            f"{bq(f'<b>{DIAMOND_FILLED} failed tasks:</b> {s.failed_tasks}')}\n"
+            f"{bq(f'<b>{DIAMOND_FILLED} published:</b> {s.published}')}\n\n"
+            f"{bq(f'<b>most requested:</b>\n{top}')}",
+            reply_markup=keyboard([("← back", cb("admin", "home"))]),
             parse_mode=ParseMode.HTML,
         )

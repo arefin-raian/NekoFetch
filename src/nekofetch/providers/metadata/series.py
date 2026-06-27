@@ -20,7 +20,7 @@ import re
 from dataclasses import dataclass, field
 
 from nekofetch.core.logging import get_logger
-from nekofetch.sources.telegram.anilist import AnilistClient
+from nekofetch.sources.telegram.anilist import AnilistClient, FranchiseRelation
 from nekofetch.sources.telegram.matching import normalize_words
 
 log = get_logger(__name__)
@@ -86,15 +86,25 @@ def _is_season_continuation(base_titles: list[str], rel_titles: list[str]) -> bo
     return False
 
 
-def _is_distinct_version(base_titles: list[str], rel: dict) -> bool:
-    fmt = rel.get("format")
-    rtype = rel.get("relation")
-    titles = rel.get("titles") or []
+def _is_distinct_version(base_titles: list[str], rel: FranchiseRelation) -> bool:
+    fmt = rel.format
+    rtype = rel.relation
+    titles = rel.titles
     if not titles or fmt not in _FULL_FORMATS | {"OVA"}:
         return False
-    if rtype in _DISTINCT_RELATIONS and fmt in _FULL_FORMATS | {"OVA"}:
-        return True
-    if rtype in _CONTINUATION_RELATIONS and fmt in _FULL_FORMATS:
+    if rtype in _DISTINCT_RELATIONS:
+        # A separate adaptation that is itself a full series (Fullmetal Alchemist
+        # vs Brotherhood) is always a distinct version. An ALTERNATIVE *OVA* is
+        # only a real "version" when it's substantial (Hellsing Ultimate, 10 eps)
+        # — single-episode pilots / recaps / PVs are also tagged ALTERNATIVE and
+        # must not show up as choices (One Piece "Romance Dawn", "MONSTERS").
+        if fmt in {"TV", "TV_SHORT"}:
+            return True
+        if fmt in {"OVA", "ONA"}:
+            return bool(rel.episodes and rel.episodes >= 2)
+    # A named continuation worth choosing is a real broadcast series (Naruto →
+    # Shippuuden). One-off ONA/short prequels (One Piece "MONSTERS") are extras.
+    if rtype in _CONTINUATION_RELATIONS and fmt in {"TV", "TV_SHORT"}:
         return not _is_season_continuation(base_titles, titles)
     return False
 
@@ -121,12 +131,12 @@ class SeriesResolver:
         seen = {base.title.lower()}
         for rel in media.relations:
             if _is_distinct_version(media.titles, rel):
-                title = rel["titles"][0]
+                title = rel.titles[0]
                 if title.lower() in seen:
                     continue
                 seen.add(title.lower())
                 entries.append(SeriesEntry(
-                    title=title, anilist_id=None, format=rel.get("format"),
-                    relation=rel.get("relation", ""), aliases=rel["titles"],
+                    title=title, anilist_id=rel.anilist_id, format=rel.format,
+                    relation=rel.relation, aliases=rel.titles,
                 ))
         return SeriesResolution(query=query, entries=entries)

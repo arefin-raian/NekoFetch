@@ -19,10 +19,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pyrogram.enums import ParseMode
+
 from nekofetch.localization.i18n import Localizer
 
 # Default parse mode for everything rendered from the catalog.
-PARSE_MODE = "HTML"
+PARSE_MODE = ParseMode.HTML
 
 _LANG_DIR = Path(__file__).resolve().parents[3] / "resources" / "language"
 _localizer = Localizer(_LANG_DIR, default="en")
@@ -139,6 +141,44 @@ class M:
     ADMIN_BTN_MANUAL = "admin_btn_manual"
     ADMIN_TG_CHOOSE = "admin_tg_choose"
     ADMIN_TG_MANUAL_PROMPT = "admin_tg_manual_prompt"
+
+    # ── Phase 1: search / confirm ──
+    CONFIRM_ANILIST_SEARCH = "confirm_anilist_search"
+    CONFIRM_TMDB_FALLBACK = "confirm_tmdb_fallback"
+    CONFIRM_ADAPTATION_CHOOSE = "confirm_adaptation_choose"
+    BTN_CHOOSE = "btn_choose"
+    BTN_READ_MORE = "btn_read_more"
+    FRANCHISE_CONTENT = "franchise_content"
+    RELATION_GRAPH = "relation_graph"
+    UNIT_SEASONS = "unit_seasons"
+    UNIT_MOVIES = "unit_movies"
+    UNIT_OVAS = "unit_ovas"
+    UNIT_ONAS = "unit_onas"
+    UNIT_SPECIALS = "unit_specials"
+    UNIT_EPS = "unit_eps"
+    FIELD_STUDIO = "field_studio"
+    FIELD_SCORE = "field_score"
+    FIELD_FORMAT = "field_format"
+    SEARCH_ANILIST_NOT_FOUND = "search_anilist_not_found"
+    SEARCH_TMDB_NOT_FOUND = "search_tmdb_not_found"
+
+    # ── website source admin ──
+    SITE_PREFERENCE_TITLE = "site_preference_title"
+    SITE_PREFERENCE_PROMPT = "site_preference_prompt"
+    SITE_PROVIDER_ANIKOTO = "site_provider_anikoto"
+    SITE_PROVIDER_KICKASS = "site_provider_kickass"
+    BTN_CONFIRM_PRIORITY = "btn_confirm_priority"
+
+    # ── log channel events ──
+    LOG_REQUEST_SUBMITTED = "log_request_submitted"
+    LOG_REQUEST_APPROVED = "log_request_approved"
+    LOG_REQUEST_REJECTED = "log_request_rejected"
+    LOG_SOURCE_ASSIGNED = "log_source_assigned"
+    LOG_JOB_QUEUED = "log_job_queued"
+    LOG_JOB_COMPLETED = "log_job_completed"
+    LOG_JOB_FAILED = "log_job_failed"
+    LOG_STAGE_COMPLETE = "log_stage_complete"
+    LOG_PUBLISHED = "log_published"
 
     # ── errors / notices ──
     ERR_GENERIC = "error_generic"

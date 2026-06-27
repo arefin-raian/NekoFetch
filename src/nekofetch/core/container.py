@@ -61,6 +61,18 @@ class Container:
         self.progress: ProgressStore | None = None
         self._services: dict[str, Any] = {}
 
+        # API clients (thin, constructed immediately — no I/O until used)
+        from nekofetch.sources.telegram.anilist import AnilistClient
+        from nekofetch.providers.metadata.tmdb import TmdbClient
+        self.anilist = AnilistClient()
+        self.tmdb = TmdbClient(
+            token=env.tmdb_read_access_token,
+            api_key=env.tmdb_api_key,
+        )
+
+        from nekofetch.providers.metadata.series import SeriesResolver
+        self.series_resolver = SeriesResolver(self.anilist)
+
     @classmethod
     def create(cls) -> "Container":
         return cls(env=get_env(), config=get_app_config())
@@ -120,6 +132,10 @@ class Container:
         close = getattr(self.metadata_provider, "close", None)
         if close is not None:
             await close()
+        if hasattr(self, 'anilist'):
+            await self.anilist.close()
+        if hasattr(self, 'tmdb'):
+            await self.tmdb.close()
         if self.redis is not None:
             await self.redis.aclose()
         if self.pg_engine is not None:

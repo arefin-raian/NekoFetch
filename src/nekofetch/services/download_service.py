@@ -217,12 +217,19 @@ class DownloadWorker:
             await NotificationService(self._c).download_complete(user_id, title, code)
         from nekofetch.services.log_channel_service import LogChannelService
 
-        await LogChannelService(self._c).event("download", "complete", job=job_id)
+        await LogChannelService(self._c).event(
+            "download", "complete", job=job_id, anime=title, code=code
+        )
         from nekofetch.services.processing.pipeline import ProcessingPipeline
 
         try:
-            await ProcessingPipeline(self._c).run_for_job(job_id)
-            await LogChannelService(self._c).event("processing", "complete", job=job_id)
+            pipeline = ProcessingPipeline(self._c)
+            # Log each stage as it runs
+            ctx = await pipeline.run_for_job(job_id)
+            await LogChannelService(self._c).event(
+                "processing", "complete", job=job_id, notes=len(ctx.notes),
+                stages=",".join(ctx.notes) if ctx.notes else None,
+            )
             if user_id:
                 from nekofetch.services.notification_service import NotificationService
                 await NotificationService(self._c).processing_complete(user_id, title, code, needs_approval=needs_approval)
@@ -250,7 +257,10 @@ class DownloadWorker:
             await NotificationService(self._c).download_failed(user_id, title, code, str(exc))
         from nekofetch.services.log_channel_service import LogChannelService
 
-        await LogChannelService(self._c).event("error", "download_failed", job=job_id, error=str(exc))
+        await LogChannelService(self._c).event(
+            "error", "download_failed", job=job_id, error=str(exc),
+            anime=title, code=code,
+        )
 
 
 def _audio_for_language(language: str) -> AudioType | None:

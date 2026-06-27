@@ -44,11 +44,11 @@ async def channels_to_join(
 
 def join_keyboard(channels: list[tuple[str, str | None]], retry_callback: str) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(f"➜ ᴊᴏɪɴ {title}", url=url)]
+        [InlineKeyboardButton(f"➜ join {title}", url=url)]
         for title, url in channels
         if url
     ]
-    rows.append([InlineKeyboardButton("✓ ɪ'ᴠᴇ ᴊᴏɪɴᴇᴅ", callback_data=retry_callback)])
+    rows.append([InlineKeyboardButton("✓ i've joined", callback_data=retry_callback)])
     return InlineKeyboardMarkup(rows)
 
 
@@ -56,13 +56,13 @@ async def check_with_animation(
     client: Client, container: Container, message: Message
 ) -> list[tuple[str, str | None]]:
     msg = await message.reply(
-        "<code>ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ!</code>", parse_mode=ParseMode.HTML
+        "<b>checking subscription!</b>", parse_mode=ParseMode.HTML
     )
-    await loading_animation(msg, "ᴄʜᴇᴄᴋɪɴɢ sᴜʙsᴄʀɪᴘᴛɪᴏɴ")
+    await loading_animation(msg, "checking subscription")
     pending = await channels_to_join(client, container, message.from_user.id)
     if not pending:
         await msg.edit_text(
-            bq("<b>🔒 sᴜʙsᴄʀɪᴘᴛɪᴏɴ sᴛᴀᴛᴜs: ᴘᴀssᴇᴅ</b>"),
+            bq("<b>🔒 subscription status: passed</b>"),
             parse_mode=ParseMode.HTML,
         )
     return pending

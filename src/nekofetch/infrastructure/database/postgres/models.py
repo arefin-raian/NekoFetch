@@ -78,6 +78,10 @@ class Request(Base, PKMixin, TimestampMixin):
     )
     position: Mapped[int | None] = mapped_column(Integer)
 
+    # Phase 1 franchise data — JSON blob with the full AniList relation graph
+    # so downstream sourcing knows the complete connected universe.
+    franchise_data: Mapped[dict | None] = mapped_column(JSONB)
+
     user: Mapped["User"] = relationship(back_populates="requests")
     jobs: Mapped[list["DownloadJob"]] = relationship(back_populates="request")
 

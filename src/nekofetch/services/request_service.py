@@ -42,6 +42,7 @@ class RequestService:
         resolution: str | None = None,
         audio: AudioType | None = None,
         anime_doc_id: str | None = None,
+        franchise_data: dict | None = None,
     ) -> RequestReceipt:
         if not self._c.config.features.request_system:
             raise FeatureDisabled("request_system")
@@ -68,6 +69,7 @@ class RequestService:
                 episodes=episodes,
                 resolution=resolution,
                 audio=audio,
+                franchise_data=franchise_data,
                 status=RequestStatus.PENDING,
             )
             await requests.add(req)
@@ -81,6 +83,9 @@ class RequestService:
         await LogChannelService(self._c).event(
             "request", "submitted", code=code, anime=anime_title, user=telegram_id,
             scope=scope.value, season=season,
+            source=source, episodes=episodes,
+            franchise_seasons=franchise_data.get("franchise_seasons") if franchise_data else None,
+            relations=len(franchise_data.get("relations", [])) if franchise_data else None,
         )
         return receipt
 
@@ -93,6 +98,24 @@ class RequestService:
             for r in rows:
                 session.expunge(r)
             return rows
+
+    async def update_source(self, code: str, new_source: str) -> Request:
+        """Update the source plugin assigned to a request."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            req.source = new_source
+            await session.flush()
+            title = req.anime_title
+            session.expunge(req)
+
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "request", "source_assigned", code=code, anime=title, source=new_source
+        )
+        return req
 
     async def reject(self, code: str) -> Request:
         """Mark a request rejected; logged to the log channel."""

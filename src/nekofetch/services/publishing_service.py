@@ -109,7 +109,9 @@ class PublishingService:
         from nekofetch.services.log_channel_service import LogChannelService
 
         await LogChannelService(self._c).event(
-            "publish", "approved", code=code, anime=title, files=count
+            "publish", "approved", code=code, anime=title, files=count,
+            audio=snapshot[0].get("audio") if snapshot else None,
+            resolution=snapshot[0].get("resolution") if snapshot else None,
         )
 
         if user_id:

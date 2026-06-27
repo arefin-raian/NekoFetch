@@ -1,0 +1,15 @@
+[18:39:27] === NYAA SOURCE VALIDATION ===
+[18:39:27] dual-audio fuzzy: {'Dual Audio': True, 'Dual-Audio': True, 'Dual_Audio': True, '[DualAudio]': True, 'DUAL.AUDIO': True, 'Multi Audio': False, 'dual subtitle': False}
+[18:39:27] CASE Attack on Titan (dual-audio, multi-season batch)
+[18:39:30] CASE Frieren (recent series, SxxExx naming)
+[18:39:31] CASE Bocchi the Rock (single-cour series)
+[18:39:33] CASE A Silent Voice (movie (single file))
+[18:39:34] CASE Cowboy Bebop (classic + movie present)
+[18:39:37] CASE Spy x Family (dual-audio, multi-cour)
+[18:39:39] --- PHASE 2: downloads + transcode ---
+[18:39:40]   [Attack on Titan] downloading EP1: [Anime Time] Attack on Titan - 01.mkv (545MB)
+[18:39:44]   [Attack on Titan] download FAILED: aria2c exited 16
+[18:39:45]   [Bocchi the Rock] downloading EP1: [Judas] Bocchi the Rock! - 01.mkv (197MB)
+[18:42:21]   [Bocchi the Rock] transcoding (veryfast)...
+[18:59:30]   [Bocchi the Rock] renditions: [('720p', 151.9), ('480p', 91.0)] oversized_1080=False
+[18:59:30] === DONE ===
