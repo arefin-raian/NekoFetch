@@ -25,8 +25,10 @@ def register(client: Client, container: Container) -> None:
     L = container.localizer.get
 
     def _allowed(obj) -> bool:
+        # Broadcasting to every user is owner-only.
         user = getattr(obj, "nf_user", None)
-        return bool(user and auth.has_permission(user, Permission.MANAGE_STAFF))
+        return bool(user and auth.is_owner(user)
+                    and auth.has_permission(user, Permission.MANAGE_STAFF))
 
     @client.on_callback_query(filters.regex(r"^admin\|broadcast"))
     async def _start(_: Client, q: CallbackQuery) -> None:

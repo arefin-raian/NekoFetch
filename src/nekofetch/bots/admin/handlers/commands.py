@@ -60,11 +60,17 @@ def _help_text(role: Role) -> str:
 
 
 def register(client: Client, container: Container) -> None:
+    from nekofetch.services.auth_service import AuthService
+
     fsm = FSM(container.redis, bot="admin")
+    auth = AuthService(container)
 
     def _role(message: Message) -> Role:
         user = getattr(message, "nf_user", None)
         return Role(user.role) if user else Role.USER
+
+    def _is_owner(message: Message) -> bool:
+        return auth.is_owner(getattr(message, "nf_user", None))
 
     @client.on_message(filters.command("help"))
     async def _help(_: Client, message: Message) -> None:
@@ -77,11 +83,11 @@ def register(client: Client, container: Container) -> None:
 
     @client.on_message(filters.command("reload"))
     async def _reload(_: Client, message: Message) -> None:
-        # Admin-only: re-read en.json from disk so text edits apply without a
+        # Owner-only: re-read en.json from disk so text edits apply without a
         # restart. Shows the exact file path + key count so you can confirm the
         # bot is reading the file you think it is.
-        if _role(message) is not Role.ADMIN:
-            await message.reply(t(M.ACCESS_DENIED), parse_mode=ParseMode.HTML)
+        if not _is_owner(message):
+            await message.reply(t(M.OWNER_ONLY), parse_mode=ParseMode.HTML)
             return
         messages_mod.reload()
         count = len(messages_mod.localizer._catalogs.get("en", {}))
@@ -92,9 +98,9 @@ def register(client: Client, container: Container) -> None:
 
     @client.on_message(filters.command("resetoverrides"))
     async def _reset_overrides(_: Client, message: Message) -> None:
-        # Admin-only: clear Mongo runtime overrides that shadow config.yaml.
-        if _role(message) is not Role.ADMIN:
-            await message.reply(t(M.ACCESS_DENIED), parse_mode=ParseMode.HTML)
+        # Owner-only: clear Mongo runtime overrides that shadow config.yaml.
+        if not _is_owner(message):
+            await message.reply(t(M.OWNER_ONLY), parse_mode=ParseMode.HTML)
             return
         from nekofetch.services.settings_service import SettingsService
 

@@ -32,8 +32,10 @@ def register(client: Client, container: Container) -> None:
     L = container.localizer.get
 
     def _allowed(q: CallbackQuery) -> bool:
+        # Storage channel ids / packs are sensitive infrastructure — owner-only.
         user = getattr(q, "nf_user", None)
-        return bool(user and auth.has_permission(user, Permission.MANAGE_STORAGE))
+        return bool(user and auth.is_owner(user)
+                    and auth.has_permission(user, Permission.MANAGE_STORAGE))
 
     @client.on_callback_query(filters.regex(r"^admin\|storage"))
     async def _menu(_: Client, q: CallbackQuery) -> None:
@@ -93,7 +95,8 @@ def register(client: Client, container: Container) -> None:
         if state != STATE_INDEX:
             return
         user = getattr(message, "nf_user", None)
-        if not (user and auth.has_permission(user, Permission.MANAGE_STORAGE)):
+        if not (user and auth.is_owner(user)
+                and auth.has_permission(user, Permission.MANAGE_STORAGE)):
             return
         await fsm.clear(message.from_user.id)
 

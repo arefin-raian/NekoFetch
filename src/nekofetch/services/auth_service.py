@@ -40,6 +40,20 @@ class AuthService:
             return Role.ADMIN
         return Role(user.role)
 
+    def owner_ids(self) -> set[int]:
+        """The owner(s) — the only identities allowed to touch sensitive config.
+
+        ``security.owner_id`` is authoritative when set; otherwise the first
+        env admin is treated as the owner so a fresh install still has one.
+        """
+        configured = self._c.config.security.owner_id
+        if configured:
+            return {configured}
+        return set(self._env.admin_ids[:1])
+
+    def is_owner(self, user: User | None) -> bool:
+        return bool(user) and user.telegram_id in self.owner_ids()
+
     def has_permission(self, user: User, permission: Permission) -> bool:
         if user.is_banned:
             return False

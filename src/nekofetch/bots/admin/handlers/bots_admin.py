@@ -24,8 +24,10 @@ def register(client: Client, container: Container) -> None:
     L = container.localizer.get
 
     def _allowed(q: CallbackQuery) -> bool:
+        # Distribution bot tokens are sensitive — owner-only.
         user = getattr(q, "nf_user", None)
-        return bool(user and auth.has_permission(user, Permission.GENERATE_BOTS))
+        return bool(user and auth.is_owner(user)
+                    and auth.has_permission(user, Permission.GENERATE_BOTS))
 
     @client.on_callback_query(filters.regex(r"^admin\|bots"))
     async def _list(_: Client, q: CallbackQuery) -> None:
@@ -86,7 +88,8 @@ def register(client: Client, container: Container) -> None:
         user = getattr(message, "nf_user", None)
         if state not in (STATE_TOKEN, STATE_BIND):
             return
-        if not (user and auth.has_permission(user, Permission.GENERATE_BOTS)):
+        if not (user and auth.is_owner(user)
+                and auth.has_permission(user, Permission.GENERATE_BOTS)):
             return
 
         if state == STATE_BIND:

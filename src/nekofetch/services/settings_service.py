@@ -92,9 +92,9 @@ class SettingsService:
         return self._c.config.features.model_dump()
 
     # ── generic config introspection (drives the Settings control center) ──────
-    # Sections that hold secrets/connection ids we never expose in-chat.
-    _HIDDEN_FIELDS = {"channel_id", "owner_id", "api_token", "linkvertise_user_id",
-                      "end_sticker_id", "start_sticker_id", "force_subscribe_channels"}
+    # Only true credentials are hidden from the in-chat panel; everything else
+    # (channel ids, stickers, force-sub channels, lists…) is configurable.
+    _HIDDEN_FIELDS = {"api_token", "linkvertise_user_id"}
 
     def section(self, name: str):
         return getattr(self._c.config, name, None)
@@ -102,9 +102,8 @@ class SettingsService:
     def section_fields(self, name: str) -> list[tuple[str, object, str]]:
         """Return ``(field, value, kind)`` for each editable field in a section.
 
-        ``kind`` is ``"bool"`` for toggles or ``"value"`` for free text/number,
-        used by the panel to decide between a switch and an edit prompt. Hidden
-        and complex (list/dict) fields are skipped.
+        ``kind`` ∈ {``"bool"`` (toggle), ``"list"`` (comma-separated editor),
+        ``"value"`` (free text/number)}. Only credentials are skipped.
         """
         target = self.section(name)
         if target is None:
@@ -115,9 +114,10 @@ class SettingsService:
                 continue
             if isinstance(value, bool):
                 out.append((field, value, "bool"))
-            elif isinstance(value, (str, int, float)):
+            elif isinstance(value, list):
+                out.append((field, value, "list"))
+            elif isinstance(value, (str, int, float)) or value is None:
                 out.append((field, value, "value"))
-            # lists/dicts are skipped — edited via dedicated flows, not free text
         return out
 
     async def toggle(self, section: str, field: str) -> bool:
@@ -126,15 +126,23 @@ class SettingsService:
         return not current
 
     async def set_typed(self, section: str, field: str, raw: str) -> object:
-        """Coerce ``raw`` text to the field's current type, then persist it."""
+        """Coerce ``raw`` text to the field's current type, then persist it.
+
+        Lists are entered comma-separated and coerced to the element type of the
+        existing list (ints stay ints — important for channel-id lists)."""
         current = getattr(self.section(section), field, None)
+        raw = raw.strip()
         if isinstance(current, bool):
-            value: object = raw.strip().lower() in ("1", "true", "yes", "on")
+            value: object = raw.lower() in ("1", "true", "yes", "on")
         elif isinstance(current, int):
-            value = int(raw.strip())
+            value = int(raw)
         elif isinstance(current, float):
-            value = float(raw.strip())
+            value = float(raw)
+        elif isinstance(current, list):
+            items = [p.strip() for p in raw.split(",") if p.strip()]
+            int_list = bool(current) and all(isinstance(x, int) for x in current)
+            value = [int(i) for i in items] if int_list else items
         else:
-            value = raw.strip()
+            value = raw
         await self.set_value(section, field, value)
         return value
