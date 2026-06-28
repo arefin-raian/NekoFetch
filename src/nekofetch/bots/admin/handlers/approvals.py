@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
 from pyrogram.types import CallbackQuery
 
 from nekofetch.core.container import Container
 from nekofetch.domain.enums import Permission
+from nekofetch.localization.messages import M
 from nekofetch.services.auth_service import AuthService
 from nekofetch.ui.components import cb, keyboard
-from nekofetch.ui.progress import loading_animation
-from nekofetch.ui.typography import bq, bqx
+from nekofetch.ui.screens import show
 
 
 def register(client: Client, container: Container) -> None:
@@ -23,69 +22,51 @@ def register(client: Client, container: Container) -> None:
     @client.on_callback_query(filters.regex(r"^approve\|panel"))
     async def _panel(_: Client, q: CallbackQuery) -> None:
         if not _allowed(q):
-            await q.answer(L("access_denied"), show_alert=True)
+            await q.answer(L(M.ACCESS_DENIED), show_alert=True)
             return
         from nekofetch.services.publishing_service import PublishingService
 
-        await loading_animation(q.message, "loading approvals")
         await q.answer()
         ready = await PublishingService(container).list_ready()
+        back = [(L(M.BTN_BACK), cb("admin", "home"))]
         if not ready:
-            await q.message.edit_text(
-                f"{bq('<b>▸ approvals</b>')}\n\n{bq('nothing awaiting approval.')}",
-                parse_mode=ParseMode.HTML,
-            )
+            caption = f"{L(M.APPROVALS_TITLE)}\n\n{L(M.APPROVALS_EMPTY)}"
+            await show(client, q.message, caption, keyboard(back))
             return
         item = ready[0]
-        res = item.resolution or "—"
-        aud = item.audio or "—"
-        thumb = "✓ available" if item.has_thumbnail else "✗ none"
-        text = (
-            f"{bq('<b>content approval</b>')}\n\n"
-            f"{bqx(f'<b>anime:</b> {item.title}\n'
-                   f'<b>files:</b> {item.files}\n'
-                   f'<b>resolution:</b> <code>{res}</code>\n'
-                   f'<b>language:</b> {aud}\n'
-                   f'<b>thumbnail:</b> {thumb}\n'
-                   f'<b>metadata:</b> ✓ updated')}"
+        thumb = L(M.APPROVALS_VALUE_YES) if item.has_thumbnail else L(M.APPROVALS_VALUE_NO)
+        caption = (
+            f"{L(M.APPROVALS_DETAIL_TITLE)}\n\n"
+            + L(M.APPROVALS_DETAIL_BODY, anime=item.title, files=item.files,
+                resolution=item.resolution or "—", language=item.audio or "—",
+                thumbnail=thumb)
         )
-        await q.message.edit_text(
-            text,
-            reply_markup=keyboard(
-                [(L("btn_publish"), cb("approve", "pub", item.code)),
-                 (L("btn_reprocess"), cb("approve", "reproc", item.code))],
-                [(L("btn_cancel"), cb("approve", "cancel", item.code))],
-            ),
-            parse_mode=ParseMode.HTML,
+        kb = keyboard(
+            [(L(M.BTN_PUBLISH), cb("approve", "pub", item.code)),
+             (L(M.BTN_REPROCESS), cb("approve", "reproc", item.code))],
+            [(L(M.BTN_CANCEL), cb("approve", "cancel", item.code))],
+            back,
         )
+        await show(client, q.message, caption, kb)
 
     @client.on_callback_query(filters.regex(r"^approve\|(pub|reproc|cancel)"))
     async def _action(_: Client, q: CallbackQuery) -> None:
         if not _allowed(q):
-            await q.answer(L("access_denied"), show_alert=True)
+            await q.answer(L(M.ACCESS_DENIED), show_alert=True)
             return
         from nekofetch.services.publishing_service import PublishingService
 
         _, action, code = q.data.split("|", 2)
         svc = PublishingService(container)
+        back = keyboard([(L(M.BTN_BACK), cb("admin", "home"))])
         if action == "pub":
-            await loading_animation(q.message, "processing")
             count = await svc.publish(code)
-            await q.answer(f"Published {count} files", show_alert=True)
-            sp = L("status_published")
-            await q.message.edit_text(
-                f"{bq(f'<b>{sp}</b>')}\n\n"
-                f"{bq(f'<code>#{code}</code> — {count} files.')}",
-                parse_mode=ParseMode.HTML,
-            )
+            await q.answer(L(M.APPROVALS_TOAST_PUBLISHED, count=count), show_alert=True)
+            await show(client, q.message, L(M.APPROVALS_PUBLISHED, code=code, count=count), back)
         elif action == "reproc":
-            await loading_animation(q.message, "processing")
             await svc.reprocess(code)
-            await q.answer("Reprocessed")
+            await q.answer(L(M.APPROVALS_TOAST_REPROCESSED))
         else:
             await svc.cancel(code)
-            await q.answer("Cancelled")
-            await q.message.edit_text(
-                bq(f"<code>#{code}</code> cancelled."),
-                parse_mode=ParseMode.HTML,
-            )
+            await q.answer(L(M.APPROVALS_TOAST_CANCELLED))
+            await show(client, q.message, L(M.APPROVALS_CANCELLED, code=code), back)

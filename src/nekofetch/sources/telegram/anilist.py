@@ -91,6 +91,51 @@ _CONTENT_RELATIONS = {
 }
 # Relations that continue the same continuity (collapse into "seasons").
 _CONTINUATION_RELATIONS = {"SEQUEL", "PREQUEL"}
+# Relations to follow when walking the franchise graph. ALTERNATIVE is excluded
+# on purpose: it links *different adaptations* (Hellsing TV vs Hellsing Ultimate,
+# Fate adaptations), which are separate versions, not part of one franchise total.
+_TRAVERSE_RELATIONS = {
+    "SEQUEL", "PREQUEL", "SIDE_STORY", "PARENT", "SPIN_OFF", "SUMMARY",
+}
+
+# Lightweight query to walk the relation graph: for a batch of ids, return each
+# node's format/episodes plus its immediate edges (so BFS can expand outward).
+_GRAPH_QUERY = """
+query ($ids: [Int]) {
+  Page(perPage: 50) {
+    media(id_in: $ids, type: ANIME) {
+      id
+      format
+      episodes
+      relations {
+        edges {
+          relationType
+          node { id type format episodes }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+@dataclass
+class FranchiseTotals:
+    """Aggregated counts across the *entire* connected franchise graph.
+
+    A node is a **season** ONLY if it is a TV/TV_SHORT entry sitting in the root's
+    SEQUEL/PREQUEL *continuity chain*. A TV series reached by any other relation
+    (SPIN_OFF, SIDE_STORY, …) is a **spin-off**, never a season. Movies, OVAs,
+    ONAs and specials are classified purely by format.
+    """
+    seasons: int = 0
+    movies: int = 0
+    ovas: int = 0
+    onas: int = 0
+    specials: int = 0
+    spin_offs: int = 0     # TV/TV_SHORT NOT in the main continuity chain
+    episodes: int = 0      # summed across season (TV/TV_SHORT) entries
+    nodes: int = 0         # total installments discovered
 
 
 @dataclass
@@ -126,7 +171,9 @@ class AnilistMedia:
     studio: str | None = None
     cover_url: str | None = None  # large cover image
     banner_url: str | None = None
-    titles: list[str] = field(default_factory=list)        # romaji/english/native
+    english: str | None = None    # preferred display title
+    romaji: str | None = None     # transliterated original
+    titles: list[str] = field(default_factory=list)        # english/romaji/native
     synonyms: list[str] = field(default_factory=list)
     relations: list[FranchiseRelation] = field(default_factory=list)
     anilist_url: str | None = None
@@ -273,6 +320,84 @@ class AnilistClient:
             return None
         return self._parse_media(media)
 
+    async def franchise_totals(self, root_id: int, *, max_nodes: int = 120) -> FranchiseTotals:
+        """Walk the *whole* connected franchise graph from ``root_id`` and tally
+        every installment by format.
+
+        AniList only returns a node's immediate relations, so the breakdown on a
+        single entry misses later seasons/cours/movies. We BFS outward, following
+        only same-franchise edges (SEQUEL / PREQUEL / SIDE_STORY / PARENT /
+        SPIN_OFF / SUMMARY — never ALTERNATIVE, which is a different adaptation),
+        expanding a whole level per request via ``id_in`` batching so it stays fast.
+        """
+        visited: set[int] = {root_id}
+        frontier: list[int] = [root_id]
+        # id -> (format, episodes) for every node we actually resolve
+        nodes: dict[int, tuple[str | None, int | None]] = {}
+        # Continuity adjacency from SEQUEL/PREQUEL edges only — this is what
+        # defines "seasons". Spin-offs/side-stories are deliberately NOT in here.
+        cont_adj: dict[int, set[int]] = {}
+
+        while frontier and len(visited) <= max_nodes:
+            batch = frontier[:50]
+            frontier = frontier[50:]
+            data = await self._post(_GRAPH_QUERY, {"ids": batch})
+            medias = (data or {}).get("Page", {}).get("media", [])
+            if not medias:
+                continue
+            for m in medias:
+                mid = m.get("id")
+                if mid is None:
+                    continue
+                nodes[mid] = (m.get("format"), m.get("episodes"))
+                for edge in m.get("relations", {}).get("edges", []):
+                    rtype = edge.get("relationType")
+                    if rtype not in _TRAVERSE_RELATIONS:
+                        continue
+                    node = edge.get("node") or {}
+                    nid = node.get("id")
+                    if not (node.get("type") == "ANIME"
+                            and node.get("format") in _ANIME_FORMATS and nid is not None):
+                        continue
+                    if rtype in _CONTINUATION_RELATIONS:  # SEQUEL / PREQUEL
+                        cont_adj.setdefault(mid, set()).add(nid)
+                        cont_adj.setdefault(nid, set()).add(mid)
+                    if nid not in visited:
+                        visited.add(nid)
+                        frontier.append(nid)
+
+        # Seasons = TV/TV_SHORT nodes reachable from the root through continuity
+        # edges ONLY. Walk that component; spin-offs hang off non-continuity edges
+        # and therefore never enter it.
+        season_ids: set[int] = set()
+        stack, seen = [root_id], {root_id}
+        while stack:
+            cur = stack.pop()
+            if nodes.get(cur, (None, None))[0] in _SERIES_FORMATS:
+                season_ids.add(cur)
+            for nb in cont_adj.get(cur, ()):
+                if nb not in seen:
+                    seen.add(nb)
+                    stack.append(nb)
+
+        totals = FranchiseTotals(nodes=len(nodes))
+        for nid, (fmt, eps) in nodes.items():
+            if fmt in _SERIES_FORMATS:
+                if nid in season_ids:
+                    totals.seasons += 1
+                    totals.episodes += eps or 0
+                else:                       # a TV series off the main line = spin-off
+                    totals.spin_offs += 1
+            elif fmt == "MOVIE":
+                totals.movies += 1
+            elif fmt == "OVA":
+                totals.ovas += 1
+            elif fmt == "ONA":
+                totals.onas += 1
+            elif fmt == "SPECIAL":
+                totals.specials += 1
+        return totals
+
     def _parse_media(self, media: dict) -> AnilistMedia:
         """Parse the raw GraphQL response into AnilistMedia with relation breakdown.
 
@@ -283,7 +408,10 @@ class AnilistClient:
         def titles_of(t: dict) -> list[str]:
             return [t.get("english"), t.get("romaji"), t.get("native")]
 
-        titles = [t for t in titles_of(media.get("title", {})) if t]
+        title_dict = media.get("title", {})
+        english = title_dict.get("english")
+        romaji = title_dict.get("romaji")
+        titles = [t for t in titles_of(title_dict) if t]
 
         relations = []
         for edge in media.get("relations", {}).get("edges", []):
@@ -346,6 +474,8 @@ class AnilistClient:
             studio=studio_name,
             cover_url=cover_url,
             banner_url=media.get("bannerImage"),
+            english=english,
+            romaji=romaji,
             titles=titles,
             synonyms=[s for s in media.get("synonyms", []) if s],
             relations=relations,

@@ -80,12 +80,19 @@ class RequestService:
 
         from nekofetch.services.log_channel_service import LogChannelService
 
-        await LogChannelService(self._c).event(
+        logcc = LogChannelService(self._c)
+        await logcc.event(
             "request", "submitted", code=code, anime=anime_title, user=telegram_id,
             scope=scope.value, season=season,
             source=source, episodes=episodes,
             franchise_seasons=franchise_data.get("franchise_seasons") if franchise_data else None,
             relations=len(franchise_data.get("relations", [])) if franchise_data else None,
+        )
+        # Operational control center: post an actionable request card so staff can
+        # assign a source (Telegram / Website / Torrent) or reject — inline.
+        await logcc.post_request_card(
+            code=code, title=anime_title, by=str(telegram_id),
+            scope=scope.value.replace("_", " ").title(),
         )
         return receipt
 

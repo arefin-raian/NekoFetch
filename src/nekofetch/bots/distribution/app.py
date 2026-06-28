@@ -12,6 +12,7 @@ from nekofetch.core.container import Container
 from nekofetch.core.exceptions import NekoFetchError
 from nekofetch.domain.enums import AudioType
 from nekofetch.infrastructure.database.postgres.models import DistributionBot
+from nekofetch.localization.messages import M
 from nekofetch.services.distribution_service import DistributionService
 from nekofetch.ui.components import cb, keyboard, parse_cb
 from nekofetch.ui.progress import loading_animation, staged_loading
@@ -180,9 +181,9 @@ def build_distribution_bot(
 
         pending = await channels_to_join(client, container, q.from_user.id)
         if pending:
-            await q.answer("still not subscribed to all channels.", show_alert=True)
+            await q.answer(container.localizer.get(M.DIST_NOT_SUBSCRIBED), show_alert=True)
             return
-        await q.answer("thanks!")
+        await q.answer(container.localizer.get(M.DIST_SUBSCRIBED_THANKS))
         await q.message.delete()
         if record.anime_doc_id:
             await _show_title(q.message, record.anime_doc_id)
@@ -217,7 +218,7 @@ def build_distribution_bot(
         cache = data.get("titles", [])
         idx = int(args[1])
         if idx >= len(cache):
-            await q.answer("unavailable", show_alert=True)
+            await q.answer(container.localizer.get(M.DIST_UNAVAILABLE), show_alert=True)
             return
         await q.answer()
         await _show_title(q.message, cache[idx]["id"], edit=True, title=cache[idx]["title"])

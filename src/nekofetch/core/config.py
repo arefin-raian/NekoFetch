@@ -204,12 +204,26 @@ class StorageChannelConfig(BaseModel):
 
 
 class LogChannelConfig(BaseModel):
-    """One channel receiving all logs, with two auto-updated pinned messages."""
+    """The operational control center: one channel of persistent, edited-in-place
+    section messages (dashboard, pending, active, completed, notices, catalog)
+    plus a pool of preallocated reserved messages used when a section message can
+    no longer be edited (Telegram's ~48h edit window)."""
 
     enabled: bool = False
     channel_id: int = 0
     pinned_dashboard: bool = True             # live stats summary (edited in place)
     pinned_catalog: bool = True               # published catalog index (edited in place)
+    sections: bool = True                     # full sectioned control center
+    reserved_slots: int = 2                   # reserved msgs per growth-prone section
+    notices_lines: int = 12                   # rolling event-stream length
+    # Sticker posted between sections as a permanent visual divider.
+    divider_sticker_id: str = (
+        "CAACAgUAAxkBAAI0vGpAOaZ7gJ6Yk9MtJ63jm0sYmDysAAIYAANDc8kSzixbXL29lfc8BA"
+    )
+    # Cover image at the very top of the channel (URL or file_id). Empty = skip.
+    cover_image: str = ""
+    # Minutes of inactivity before a human discussion thread is auto-deleted.
+    discussion_ttl_minutes: int = 5
     refresh_seconds: int = 60
     # 'all' = everything; otherwise a subset of categories to forward.
     events: list[str] = Field(default_factory=lambda: ["all"])
@@ -277,8 +291,10 @@ class IndexChannelConfig(BaseModel):
 
 
 class SourcesConfig(BaseModel):
-    enabled: list[str] = Field(default_factory=lambda: ["local", "anikoto"])
-    default: str = "local"
+    enabled: list[str] = Field(
+        default_factory=lambda: ["local", "telegram", "anikoto", "kickassanime", "nyaa"]
+    )
+    default: str = "telegram"
 
 
 class UIConfig(BaseModel):

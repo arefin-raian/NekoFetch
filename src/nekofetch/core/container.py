@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 from nekofetch.core.config import AppConfig, EnvSettings, get_app_config, get_env
 from nekofetch.core.logging import get_logger
 from nekofetch.core.security import TokenCipher
-from nekofetch.localization.i18n import Localizer
 from nekofetch.sources.registry import SourceRegistry, build_default_registry
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -38,9 +37,17 @@ class Container:
         self.config = config
         self.cipher = TokenCipher(env.secret_key)
 
-        # Stateless singletons available immediately.
-        self.localizer = Localizer(
-            config.localization.directory, default=config.localization.default_language
+        # Stateless singletons available immediately. Reuse the one shared catalog
+        # (absolute path, CWD-independent) so t() and container.localizer.get()
+        # read the same en.json and edits propagate on restart.
+        from nekofetch.localization import messages as _messages
+
+        _messages.reload()  # pick up any en.json edits made since import
+        self.localizer = _messages.localizer
+        log.info(
+            "localization.loaded",
+            path=str(_messages.LANG_DIR / "en.json"),
+            keys=len(self.localizer._catalogs.get("en", {})),
         )
         self.sources: SourceRegistry = build_default_registry()
 
@@ -62,8 +69,8 @@ class Container:
         self._services: dict[str, Any] = {}
 
         # API clients (thin, constructed immediately — no I/O until used)
-        from nekofetch.sources.telegram.anilist import AnilistClient
         from nekofetch.providers.metadata.tmdb import TmdbClient
+        from nekofetch.sources.telegram.anilist import AnilistClient
         self.anilist = AnilistClient()
         self.tmdb = TmdbClient(
             token=env.tmdb_read_access_token,
@@ -117,7 +124,9 @@ class Container:
         await SettingsService(self).apply_overrides()
 
         # Activate only authorized sources listed in config.
-        self.sources.activate(self.config.sources.enabled)
+        self.sources.activate(
+            self.config.sources.enabled, default=self.config.sources.default
+        )
 
         self.env.storage_path.mkdir(parents=True, exist_ok=True)
         self.env.session_path.mkdir(parents=True, exist_ok=True)

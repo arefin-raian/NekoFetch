@@ -36,8 +36,14 @@ class SettingsService:
         )
 
     async def apply_overrides(self) -> None:
-        """Apply persisted overrides onto the live config (called at startup)."""
+        """Apply persisted overrides onto the live config (called at startup).
+
+        These come from the in-bot Settings panel and **shadow config.yaml**. We
+        log every shadowed field so a "config.yaml edit isn't taking effect" is
+        immediately explained by the log (the override wins until it's cleared).
+        """
         overrides = await self._load_doc()
+        applied: list[str] = []
         for section, values in overrides.items():
             target = getattr(self._c.config, section, None)
             if target is None:
@@ -45,8 +51,21 @@ class SettingsService:
             for field, val in values.items():
                 if hasattr(target, field):
                     setattr(target, field, val)
-        if overrides:
-            log.info("settings.overrides.applied", sections=list(overrides))
+                    applied.append(f"{section}.{field}={val!r}")
+        if applied:
+            log.warning("settings.overrides.shadowing_config_yaml", overrides=applied)
+
+    async def clear_overrides(self) -> int:
+        """Drop all runtime overrides so config.yaml becomes authoritative again.
+
+        Returns the number of fields cleared. Note: values already applied to the
+        live config persist until the next restart re-reads config.yaml.
+        """
+        doc = await self._load_doc()
+        count = sum(len(v) for v in doc.values() if isinstance(v, dict))
+        await self._save_doc({})
+        log.info("settings.overrides.cleared", fields=count)
+        return count
 
     async def set_value(self, section: str, field: str, value: Any) -> None:
         target = getattr(self._c.config, section, None)
@@ -71,3 +90,51 @@ class SettingsService:
 
     def feature_map(self) -> dict[str, bool]:
         return self._c.config.features.model_dump()
+
+    # ── generic config introspection (drives the Settings control center) ──────
+    # Sections that hold secrets/connection ids we never expose in-chat.
+    _HIDDEN_FIELDS = {"channel_id", "owner_id", "api_token", "linkvertise_user_id",
+                      "end_sticker_id", "start_sticker_id", "force_subscribe_channels"}
+
+    def section(self, name: str):
+        return getattr(self._c.config, name, None)
+
+    def section_fields(self, name: str) -> list[tuple[str, object, str]]:
+        """Return ``(field, value, kind)`` for each editable field in a section.
+
+        ``kind`` is ``"bool"`` for toggles or ``"value"`` for free text/number,
+        used by the panel to decide between a switch and an edit prompt. Hidden
+        and complex (list/dict) fields are skipped.
+        """
+        target = self.section(name)
+        if target is None:
+            return []
+        out: list[tuple[str, object, str]] = []
+        for field, value in target.model_dump().items():
+            if field in self._HIDDEN_FIELDS:
+                continue
+            if isinstance(value, bool):
+                out.append((field, value, "bool"))
+            elif isinstance(value, (str, int, float)):
+                out.append((field, value, "value"))
+            # lists/dicts are skipped — edited via dedicated flows, not free text
+        return out
+
+    async def toggle(self, section: str, field: str) -> bool:
+        current = bool(getattr(self.section(section), field))
+        await self.set_value(section, field, not current)
+        return not current
+
+    async def set_typed(self, section: str, field: str, raw: str) -> object:
+        """Coerce ``raw`` text to the field's current type, then persist it."""
+        current = getattr(self.section(section), field, None)
+        if isinstance(current, bool):
+            value: object = raw.strip().lower() in ("1", "true", "yes", "on")
+        elif isinstance(current, int):
+            value = int(raw.strip())
+        elif isinstance(current, float):
+            value = float(raw.strip())
+        else:
+            value = raw.strip()
+        await self.set_value(section, field, value)
+        return value

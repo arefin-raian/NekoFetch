@@ -17,6 +17,7 @@ def register_all(client: Client, container: Container) -> None:
         approvals,
         bots_admin,
         commands,
+        log_discussion,
         requests,
         review,
         settings,
@@ -38,3 +39,4 @@ def register_all(client: Client, container: Container) -> None:
     storage_admin.register(client, container)
     admin_tools.register(client, container)
     staff_admin.register(client, container)
+    log_discussion.register(client, container)

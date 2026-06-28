@@ -17,19 +17,13 @@ from pyrogram import Client
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from nekofetch.core.constants import BULLET, DOT_ACTIVE, DOT_DONE, DOT_PENDING
 from nekofetch.localization.messages import PARSE_MODE, M, t
 from nekofetch.ui.artwork import pick_artwork
 from nekofetch.ui.components import cb
 
-# ── status glyphs (lifecycle / lists) ──
-DONE, CURRENT, PENDING = "●", "➤", "◌"
-
-# Relation kinds / formats worth showing in the confirmation card's related-entries
-# block — keep it to real, watchable franchise content (no source manga, no joke
-# character shorts, no OTHER noise).
-_REL_SHOW = {"SEQUEL", "PREQUEL", "SIDE_STORY", "ALTERNATIVE", "SPIN_OFF",
-             "PARENT", "SUMMARY"}
-_REL_FORMATS = {"TV", "TV_SHORT", "MOVIE", "OVA", "ONA", "SPECIAL"}
+# ── status glyphs (lifecycle / lists) — shared design language ──
+DONE, CURRENT, PENDING = DOT_DONE, DOT_ACTIVE, DOT_PENDING
 
 # Lifecycle order; labels resolve from the catalog at render time.
 _LIFECYCLE_KEYS = [
@@ -37,6 +31,12 @@ _LIFECYCLE_KEYS = [
     M.LC_PROCESSING_META, M.LC_EXTRACTING_SUBS, M.LC_WATERMARK,
     M.LC_UPLOADING, M.LC_PUBLISHED, M.LC_COMPLETED,
 ]
+
+
+# Telegram hard limits. The photo-caption budget is kept a touch under 1024 so a
+# trailing entity or stray character can never tip a send over the edge.
+CAPTION_LIMIT = 1000
+MESSAGE_LIMIT = 4096
 
 
 @dataclass(slots=True)
@@ -49,6 +49,29 @@ class Screen:
 
 def _esc(text: str) -> str:
     return html.escape(text or "", quote=False)
+
+
+def visible_len(html_text: str) -> int:
+    """Approximate the length Telegram counts — tags become entities and don't
+    count toward the caption/message limit, so measure the stripped text."""
+    return len(html.unescape(re.sub(r"<[^>]+>", "", html_text or "")))
+
+
+def _truncate_html(html_text: str, limit: int) -> str:
+    """Shorten ``html_text`` so its *visible* length fits ``limit``.
+
+    Drops whole lines from the end (keeping HTML tags balanced, since each line is
+    self-contained) until it fits, then appends an ellipsis. A blunt last-resort
+    safeguard — callers should budget content first; this only guarantees we never
+    exceed the hard limit.
+    """
+    if visible_len(html_text) <= limit:
+        return html_text
+    lines = html_text.split("\n")
+    while lines and visible_len("\n".join(lines)) > limit - 1:
+        lines.pop()
+    out = "\n".join(lines).rstrip()
+    return (out + " …") if out else html_text[:limit]
 
 
 def _kb(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
@@ -69,16 +92,21 @@ def lifecycle_labels() -> list[str]:
 
 # ── User screens ───────────────────────────────────────────────────────────
 
-def welcome(user_name: str) -> Screen:
+def welcome(user_name: str, *, is_staff: bool = False, is_admin: bool = False) -> Screen:
     name = _esc(user_name) or "there"
     caption = "\n\n".join([
         t(M.WELCOME_TITLE, name=name),
         t(M.WELCOME_BODY),
         t(M.WELCOME_LIBRARY),
     ])
-    kb = _kb([[(t(M.BTN_REQUEST_ANIME), cb("req", "new")),
-               (t(M.BTN_MY_REQUESTS), cb("req", "mine", 0))]])
-    return Screen(caption=caption, image=pick_artwork(), keyboard=kb)
+    rows = [[(t(M.BTN_REQUEST_ANIME), cb("req", "new")),
+             (t(M.BTN_MY_REQUESTS), cb("req", "mine", 0))]]
+    if is_staff or is_admin:
+        rows.append([(t(M.BTN_REVIEW_REQUESTS), cb("staff", "requests", 0)),
+                     (t(M.ADMIN_BTN_QUEUE), cb("queue", "view", 0))])
+    if is_admin:
+        rows.append([(t(M.ADMIN_BTN_PANEL), cb("admin", "home"))])
+    return Screen(caption=caption, image=pick_artwork(), keyboard=_kb(rows))
 
 
 def my_requests(user_name: str, requests: list[dict]) -> Screen:
@@ -107,10 +135,6 @@ def ask_title() -> Screen:
                   keyboard=_kb([[(t(M.BTN_BACK), cb("home"))]]))
 
 
-def searching(query: str, frame: str = "⠹") -> Screen:
-    return Screen(caption=t(M.SEARCHING, query=_esc(query), frame=frame), image=None)
-
-
 def confirm_franchise(
     media_data: dict,
     backdrop_path: str | None = None,
@@ -123,41 +147,49 @@ def confirm_franchise(
     franchise_specials, relations (list of dicts each with relation, format,
     episodes, titles), anilist_url, cover_url, banner_url
     """
-    title = _esc(media_data.get("title", "Unknown"))
+    english = _esc(media_data.get("english") or media_data.get("title", "Unknown"))
+    romaji = media_data.get("romaji")
     year = media_data.get("year")
-    header = f"🎬  <b>{title}</b>"
+
+    # ── header (inside a blockquote): 🎬 Title (year) ❘ romaji ──
+    head_inner = f"🎬 <b>{english}"
     if year:
-        header += f"  <i>({_esc(str(year))})</i>"
-    rows = [header, ""]
+        head_inner += f" ({_esc(str(year))})"
+    if romaji and romaji.casefold() != (media_data.get("english") or "").casefold():
+        head_inner += f" ❘</b> <i>{_esc(romaji)}</i>"
+    else:
+        head_inner += "</b>"
+    rows = [f"<blockquote>{head_inner}</blockquote>", ""]
 
-    # ── metadata fields ──
+    # ── metadata fields: "<b>Label :</b> value" ──
+    def kv(label_key: str, value: str) -> str:
+        return f"<b>{t(label_key)} :</b> {_esc(value)}"
+
     if media_data.get("format"):
-        rows.append(_field(M.F_TYPE, media_data["format"]))
+        rows.append(kv(M.F_TYPE, media_data["format"]))
     if media_data.get("status"):
-        rows.append(_field(M.F_STATUS, media_data["status"]))
+        rows.append(kv(M.F_STATUS, media_data["status"]))
     if media_data.get("score"):
-        rows.append(_field(M.F_RATING, f"{media_data['score']}/10"))
+        rows.append(f"<b>{t(M.F_RATING)} :</b> {media_data['score']}/10")
     if media_data.get("studio"):
-        rows.append(_field(M.FIELD_STUDIO, media_data["studio"]))
+        rows.append(kv(M.FIELD_STUDIO, media_data["studio"]))
     if media_data.get("genres"):
-        rows.append(_field(M.F_GENRES, t(M.SEP_DOT).join(media_data["genres"][:5])))
+        rows.append(kv(M.F_GENRES, t(M.SEP_DOT).join(media_data["genres"][:5])))
 
-    # ── synopsis (cleanly truncated, with a Read More link to AniList) ──
+    # ── synopsis inside an expandable blockquote (Read More button if clipped) ──
     synopsis = (media_data.get("synopsis") or "").strip()
-    # AniList descriptions may carry inline <br>/<i> markup — strip tags for a
-    # clean, predictable caption.
     synopsis = html.unescape(re.sub(r"<[^>]+>", "", synopsis)).strip()
-    anilist_url = media_data.get("anilist_url")
+    read_more_url: str | None = None
     if synopsis:
-        if len(synopsis) > 300:
-            clipped = _esc(synopsis[:300].rsplit(" ", 1)[0]) + "…"
-            if anilist_url:
-                clipped += f" <a href=\"{_esc(anilist_url)}\">{t(M.BTN_READ_MORE)}</a>"
-            rows += ["", clipped]
+        if len(synopsis) > 600:
+            synopsis = _esc(synopsis[:600].rsplit(" ", 1)[0]) + "…"
+            read_more_url = media_data.get("synopsis_url") or media_data.get("anilist_url")
         else:
-            rows += ["", _esc(synopsis)]
+            synopsis = _esc(synopsis)
+        syn_label = t(M.FIELD_SYNOPSIS)
+        rows += ["", f"<blockquote expandable><b>{syn_label} :</b> {synopsis}</blockquote>"]
 
-    # ── franchise breakdown ──
+    # ── franchise content (computed from the full relation graph) ──
     ep_total = media_data.get("franchise_episodes")
     units = (
         (media_data.get("franchise_seasons", 0), M.UNIT_SEASONS),
@@ -165,6 +197,7 @@ def confirm_franchise(
         (media_data.get("franchise_ovas", 0), M.UNIT_OVAS),
         (media_data.get("franchise_onas", 0), M.UNIT_ONAS),
         (media_data.get("franchise_specials", 0), M.UNIT_SPECIALS),
+        (media_data.get("franchise_spinoffs", 0), M.UNIT_SPINOFFS),
     )
     breakdown_bits = []
     for n, key in units:
@@ -172,34 +205,25 @@ def confirm_franchise(
             word = t(key)
             if n == 1 and word.endswith("s"):   # 1 season, 1 OVA, 1 movie
                 word = word[:-1]
-            bit = f"<b>{n}</b> {word}"
+            bit = f"{n} {word}"
             if key == M.UNIT_SEASONS and ep_total:
                 bit += f" ({ep_total} {t(M.UNIT_EPS)})"
             breakdown_bits.append(bit)
     if breakdown_bits:
-        rows += ["", t(M.FRANCHISE_CONTENT) + "  " + "  ✦  ".join(breakdown_bits)]
-
-    # ── related entries (filtered, newline-separated, expandable) ──
-    relations = [
-        r for r in media_data.get("relations", [])
-        if r.get("relation") in _REL_SHOW and r.get("format") in _REL_FORMATS
-    ]
-    if relations:
-        rel_lines = []
-        for r in relations[:15]:  # cap to avoid runaway captions
-            rtype = _esc((r.get("relation") or "").replace("_", " ").title())
-            titles = r.get("titles") or ["?"]
-            rtitle = _esc(titles[0])
-            rfmt = _esc(r.get("format") or "")
-            reps = r.get("episodes")
-            rep_str = f" · {reps} {t(M.UNIT_EPS)}" if reps and reps > 1 else ""
-            rel_lines.append(f"• <b>{rtitle}</b> · {rtype} · {rfmt}{rep_str}")
-        graph = "\n".join(rel_lines)
-        rows += ["", f"<blockquote expandable><b>{t(M.RELATION_GRAPH)}</b>\n{graph}</blockquote>"]
+        rows += ["", t(M.FRANCHISE_CONTENT) + " " + f" {BULLET} ".join(breakdown_bits)]
 
     rows += ["", t(M.CONFIRM_QUESTION)]
-    kb = _kb([[(t(M.BTN_SERIES_YES), cb("series_yes", str(media_data.get("anilist_id", "")))),
-               (t(M.BTN_SERIES_NO), cb("series_no"))]])
+    caption = _truncate_html("\n".join(rows), CAPTION_LIMIT)
+
+    kb_rows: list[list[InlineKeyboardButton]] = []
+    if read_more_url:
+        kb_rows.append([InlineKeyboardButton(t(M.BTN_READ_MORE), url=read_more_url)])
+    kb_rows.append([
+        InlineKeyboardButton(t(M.BTN_SERIES_YES),
+                             callback_data=cb("series_yes", str(media_data.get("anilist_id", "")))),
+        InlineKeyboardButton(t(M.BTN_SERIES_NO), callback_data=cb("series_no")),
+    ])
+    kb = InlineKeyboardMarkup(kb_rows)
 
     # Image priority: TMDB backdrop → AniList banner → cover → random local art.
     image: str | Path | None = None
@@ -209,35 +233,7 @@ def confirm_franchise(
         image = media_data["banner_url"]
     elif media_data.get("cover_url"):
         image = media_data["cover_url"]
-    return Screen(caption="\n".join(rows), image=image or pick_artwork(), keyboard=kb)
-
-
-# ── backward-compat alias with adapted signature ──
-def confirm_series(info: dict, image: Path | None = None) -> Screen:
-    """Wrap old ``confirm_series(info, image)`` calls into the new ``confirm_franchise``."""
-    target = confirm_franchise
-    mapped = {
-        "title": info.get("title", ""),
-        "year": info.get("year"),
-        "format": info.get("media_type", "").upper(),
-        "status": None,
-        "score": info.get("rating"),
-        "studio": None,
-        "genres": info.get("genres", []),
-        "synopsis": info.get("overview", ""),
-        "franchise_episodes": info.get("episodes"),
-        "franchise_seasons": info.get("seasons") or 1,
-        "franchise_movies": 0,
-        "franchise_ovas": 0,
-        "franchise_specials": 0,
-        "relations": [],
-        "anilist_id": str(info.get("id", "")),
-        "anilist_url": None,
-        "cover_url": None,
-        "banner_url": None,
-        "_source": "tmdb",
-    }
-    return target(mapped)
+    return Screen(caption=caption, image=image or pick_artwork(), keyboard=kb)
 
 
 def choose_version(query: str, versions: list[dict]) -> Screen:
@@ -313,6 +309,24 @@ def log_card(req: dict) -> Screen:
     return Screen(caption="\n".join(rows), image=pick_artwork())
 
 
+async def show(
+    client: Client,
+    src_msg: Message,
+    caption: str,
+    keyboard: InlineKeyboardMarkup | None = None,
+    *,
+    image: str | Path | None = None,
+) -> Message:
+    """Render an admin screen in place of ``src_msg`` with rotating artwork.
+
+    Works whether ``src_msg`` is a text or a photo message — it deletes the old
+    one and sends a fresh photo, sidestepping Telegram's "can't edit a media
+    message's text" limitation that plagues callback-driven panels.
+    """
+    screen = Screen(caption=caption, image=image or pick_artwork(), keyboard=keyboard)
+    return await send_screen(client, src_msg.chat.id, screen, old_msg=src_msg)
+
+
 async def send_screen(
     client: Client,
     chat_id: int,
@@ -332,18 +346,30 @@ async def send_screen(
         except Exception:
             pass
 
+    caption = screen.caption or ""
     photo = screen.image
+
     if photo:
-        return await client.send_photo(
-            chat_id,
-            photo=str(photo) if isinstance(photo, Path) else photo,
-            caption=screen.caption,
-            parse_mode=screen.parse_mode,
-            reply_markup=screen.keyboard,
+        photo_arg = str(photo) if isinstance(photo, Path) else photo
+        # Caption fits the photo budget → single photo message (the common path).
+        if visible_len(caption) <= CAPTION_LIMIT:
+            return await client.send_photo(
+                chat_id, photo=photo_arg, caption=caption,
+                parse_mode=screen.parse_mode, reply_markup=screen.keyboard,
+            )
+        # Overflow: send the image alone, then the full body (and the keyboard) as
+        # a follow-up text message. Telegram never sees an over-budget caption, so
+        # MEDIA_CAPTION_TOO_LONG can't happen — and no HTML is broken.
+        try:
+            await client.send_photo(chat_id, photo=photo_arg)
+        except Exception:
+            pass
+        return await client.send_message(
+            chat_id, _truncate_html(caption, MESSAGE_LIMIT),
+            parse_mode=screen.parse_mode, reply_markup=screen.keyboard,
         )
+
     return await client.send_message(
-        chat_id,
-        screen.caption,
-        parse_mode=screen.parse_mode,
-        reply_markup=screen.keyboard,
+        chat_id, _truncate_html(caption, MESSAGE_LIMIT),
+        parse_mode=screen.parse_mode, reply_markup=screen.keyboard,
     )

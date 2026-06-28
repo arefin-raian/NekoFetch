@@ -8,9 +8,10 @@ from pyrogram.types import Message
 
 from nekofetch.core.container import Container
 from nekofetch.domain.enums import Role
-from nekofetch.ui.components import cb
+from nekofetch.localization.messages import M, t
 from nekofetch.ui.progress import staged_loading
-from nekofetch.ui.screens import welcome as welcome_screen, send_screen
+from nekofetch.ui.screens import send_screen
+from nekofetch.ui.screens import welcome as welcome_screen
 
 
 def register(client: Client, container: Container) -> None:
@@ -25,17 +26,20 @@ def register(client: Client, container: Container) -> None:
             chat_id=message.chat.id, sticker=ui_cfg.start_sticker_id
         )
 
-        msg = await message.reply(
-            "<b>connecting!</b>", parse_mode=ParseMode.HTML
-        )
+        msg = await message.reply(t(M.CONNECTING), parse_mode=ParseMode.HTML)
         await staged_loading(
             msg,
-            ["connecting", "loading", "verifying access"],
+            [t(M.LOADING_STAGE_CONNECTING), t(M.LOADING_STAGE_LOADING),
+             t(M.LOADING_STAGE_VERIFYING)],
             delay_per_stage=ui_cfg.loading_dot_delay * 3,
         )
 
         name = message.from_user.first_name if message.from_user else ""
-        screen = welcome_screen(name)
+        screen = welcome_screen(
+            name,
+            is_staff=role in (Role.STAFF, Role.ADMIN),
+            is_admin=role is Role.ADMIN,
+        )
 
         await asyncio.sleep(ui_cfg.sticker_delete_delay)
         await start_sticker.delete()

@@ -113,6 +113,8 @@ log_channel:
   pinned_catalog: true          # published catalog index (edited in place)
   refresh_seconds: 60
   events: [all]                 # 'all' = everything; or a subset of categories
+  cover_image: "https://x02.me/i/W3GA9E.png"   # cover photo atop the control center
+  discussion_ttl_minutes: 5     # idle human chatter auto-deletes after N minutes
 
 # Access: free trial, then renew via a shortlink token.
 access:
@@ -163,8 +165,8 @@ index_channel:
 
 sources:
   # Only authorized sources are enabled. Pirate-site plugins are not shipped.
-  enabled: [kickassanime, local]
-  default: kickassanime
+  enabled: [local, telegram, anikoto, kickassanime, nyaa]
+  default: telegram
 
 localization:
   default_language: en

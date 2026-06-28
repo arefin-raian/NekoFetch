@@ -11,9 +11,10 @@ from nekofetch.core.container import Container
 from nekofetch.domain.enums import Permission
 from nekofetch.infrastructure.database.postgres.session import session_scope
 from nekofetch.infrastructure.repositories.user_repo import UserRepository
+from nekofetch.localization.messages import M
 from nekofetch.services.auth_service import AuthService
 from nekofetch.ui.progress import loading_animation
-from nekofetch.ui.typography import bq
+from nekofetch.ui.screens import show
 
 STATE_BROADCAST = "admin:await_broadcast"
 
@@ -30,18 +31,16 @@ def register(client: Client, container: Container) -> None:
     @client.on_callback_query(filters.regex(r"^admin\|broadcast"))
     async def _start(_: Client, q: CallbackQuery) -> None:
         if not _allowed(q):
-            await q.answer(L("access_denied"), show_alert=True)
+            await q.answer(L(M.ACCESS_DENIED), show_alert=True)
             return
         await fsm.set(q.from_user.id, STATE_BROADCAST)
         await q.answer()
-        await q.message.edit_text(
-            bq("<b>broadcast</b>\n\n"
-               "send the message to broadcast (text or media). "
-               "it will be copied to all users."),
-            parse_mode=ParseMode.HTML,
-        )
+        from nekofetch.ui.components import cb, keyboard
 
-    @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=5)
+        kb = keyboard([(L(M.BTN_CANCEL), cb("admin", "home"))])
+        await show(client, q.message, L(M.BROADCAST_PROMPT), kb)
+
+    @client.on_message(filters.text & filters.private & ~filters.command(["start"]), group=8)
     async def _broadcast(_: Client, message: Message) -> None:
         if not message.from_user:
             return
@@ -53,10 +52,8 @@ def register(client: Client, container: Container) -> None:
         async with session_scope(container.pg_sessionmaker) as session:
             ids = await UserRepository(session).all_telegram_ids()
 
-        status = await message.reply(
-            "<b>broadcasting!</b>", parse_mode=ParseMode.HTML
-        )
-        await loading_animation(status, "broadcasting")
+        status = await message.reply(L(M.BROADCAST_SENDING), parse_mode=ParseMode.HTML)
+        await loading_animation(status, L(M.BROADCAST_SENDING))
         sent = failed = 0
         for uid in ids:
             try:
@@ -72,7 +69,5 @@ def register(client: Client, container: Container) -> None:
             "admin", "broadcast", sent=sent, failed=failed, by=message.from_user.id
         )
         await status.edit_text(
-            f"{bq('<b>broadcast complete</b>')}\n\n"
-            f"{bq(f'delivered: <b>{sent}</b>\nfailed: <b>{failed}</b>')}",
-            parse_mode=ParseMode.HTML,
+            L(M.BROADCAST_DONE, sent=sent, failed=failed), parse_mode=ParseMode.HTML
         )

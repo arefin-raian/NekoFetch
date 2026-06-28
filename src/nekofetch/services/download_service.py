@@ -76,7 +76,7 @@ class DownloadWorker:
         async with session_scope(self._c.pg_sessionmaker) as session:
             job = await session.get(DownloadJob, job_id)
             req = await RequestRepository(session).get(job.request_id)
-            source = self._c.sources.get(req.source)
+            source = self._c.sources.resolve(req.source)
             episodes = await source.get_episodes(req.source_ref)
             if req.season is not None:
                 episodes = [e for e in episodes if e.season == req.season]

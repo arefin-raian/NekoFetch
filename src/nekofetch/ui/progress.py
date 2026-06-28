@@ -35,6 +35,35 @@ async def loading_animation(msg: Message, label: str, steps: int = 3, delay: flo
         await asyncio.sleep(delay)
 
 
+SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+
+async def animate_until(
+    msg: Message,
+    awaitable,
+    render,
+    *,
+    cadence: float = 0.55,
+):
+    """Keep ``msg`` visibly alive (cycling spinner) until ``awaitable`` resolves.
+
+    ``render(frame)`` returns the HTML caption for a given spinner frame. The
+    awaited result is returned. Telegram flood/edit errors are swallowed — the
+    animation is cosmetic and must never break the actual operation.
+    """
+    task = asyncio.ensure_future(awaitable)
+    frame = 0
+    while not task.done():
+        await asyncio.sleep(cadence)
+        frame += 1
+        try:
+            await msg.edit_text(render(SPINNER[frame % len(SPINNER)]),
+                                parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+    return await task
+
+
 async def staged_loading(msg: Message, stages: list[str], delay_per_stage: float = 0.4) -> None:
     for stage in stages:
         for dots in range(1, 4):

@@ -14,6 +14,8 @@ Workflow:
 
 from __future__ import annotations
 
+import html
+
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import CallbackQuery, Message
@@ -23,6 +25,7 @@ from nekofetch.core.container import Container
 from nekofetch.core.exceptions import NekoFetchError
 from nekofetch.domain.enums import DownloadScope
 from nekofetch.localization.messages import M, t
+from nekofetch.ui.progress import SPINNER, animate_until
 from nekofetch.ui.screens import (
     Screen,
     ask_title,
@@ -32,6 +35,11 @@ from nekofetch.ui.screens import (
     retry_title,
     send_screen,
 )
+
+
+def _esc_q(text: str) -> str:
+    """Escape a user-supplied query for safe inclusion in HTML captions."""
+    return html.escape(text or "", quote=False)
 
 STATE_NAME = "req:await_name"
 STATE_FRANCHISE = "req:franchise"
@@ -61,21 +69,28 @@ def register(client: Client, container: Container) -> None:
     # Phase 1 search — AniList only, no source plugin search
     # ──────────────────────────────────────────────────────────────────────────
     async def _search_anilist(message: Message, query: str) -> None:
-        msg = await message.reply(t(M.CONFIRM_ANILIST_SEARCH), parse_mode=ParseMode.HTML)
+        # Neutral, animated status — never expose the underlying providers.
+        def _frame(f: str) -> str:
+            return t(M.SEARCHING, query=_esc_q(query), frame=f)
 
-        # --- 1. Query AniList ---
-        media = await container.anilist.search(query)
+        msg = await message.reply(_frame(SPINNER[0]), parse_mode=ParseMode.HTML)
+
+        # --- 1. Resolve the title (AniList first, internally) ---
+        media = await animate_until(msg, container.anilist.search(query), _frame)
         if media is None:
-            # Fallback: try TMDB (TV preferred, then movie)
-            await msg.edit_text(t(M.CONFIRM_TMDB_FALLBACK), parse_mode=ParseMode.HTML)
-            tmdb_result = await container.tmdb.search(query)
+            # Internally fall back to TMDB — the user never sees a provider switch.
+            tmdb_result = await animate_until(msg, container.tmdb.search(query), _frame)
             if tmdb_result is None:
-                await msg.edit_text(t(M.SEARCH_ANILIST_NOT_FOUND), parse_mode=ParseMode.HTML)
+                await msg.edit_text(t(M.SEARCH_NOT_FOUND, query=_esc_q(query)),
+                                    parse_mode=ParseMode.HTML)
                 return
 
             # TMDB fallback: build a minimal franchise info
+            tmdb_url = f"https://www.themoviedb.org/{tmdb_result.media_type}/{tmdb_result.id}"
             franchise_data = {
                 "title": tmdb_result.title,
+                "english": tmdb_result.title,
+                "romaji": None,
                 "year": tmdb_result.year,
                 "format": tmdb_result.media_type.upper(),
                 "status": None,
@@ -83,15 +98,16 @@ def register(client: Client, container: Container) -> None:
                 "studio": None,
                 "genres": tmdb_result.genres,
                 "synopsis": tmdb_result.overview,
+                "synopsis_url": tmdb_url,
                 "franchise_episodes": tmdb_result.episodes,
                 "franchise_seasons": tmdb_result.seasons or 1,
-            "franchise_movies": 0,
-            "franchise_ovas": 0,
-            "franchise_onas": 0,
-            "franchise_specials": 0,
-            "relations": [],
-            "anilist_id": str(tmdb_result.id),
-                "anilist_url": None,
+                "franchise_movies": 0,
+                "franchise_ovas": 0,
+                "franchise_onas": 0,
+                "franchise_specials": 0,
+                "relations": [],
+                "anilist_id": str(tmdb_result.id),
+                "anilist_url": tmdb_url,
                 "cover_url": tmdb_result.poster_url,
                 "banner_url": tmdb_result.backdrop_url,
                 "_source": "tmdb",
@@ -131,18 +147,10 @@ def register(client: Client, container: Container) -> None:
             msg = await send_screen(client, message.chat.id, screen, old_msg=msg)
             return
 
-        # --- 3. Single match — fetch TMDB for synopsis + backdrop ---
-        # TMDB synopsis is preferred (better franchise-level overview) over AniList's.
-        backdrop_path = None
-        try:
-            tmdb_match = await container.tmdb.search(media.titles[0] if media.titles else query)
-            if tmdb_match:
-                backdrop_path = tmdb_match.backdrop_url
-                if tmdb_match.overview:
-                    franchise_data["synopsis"] = tmdb_match.overview
-        except Exception:
-            pass
-
+        # --- 3. Single match — full-graph franchise totals + TMDB English backdrop
+        # and franchise synopsis. ---
+        await _apply_franchise_totals(franchise_data)
+        backdrop_path = await _enrich_with_tmdb(franchise_data, media.english or query)
         franchise_data["_backdrop_url"] = backdrop_path
 
         await fsm.set(
@@ -205,11 +213,17 @@ def register(client: Client, container: Container) -> None:
 
         franchise_data["title"] = chosen.get("title", franchise_data.get("title", query))
 
+        # Full-graph franchise totals + TMDB English backdrop / franchise synopsis.
+        await _apply_franchise_totals(franchise_data)
+        search_title = franchise_data.get("english") or franchise_data["title"]
+        backdrop_path = await _enrich_with_tmdb(franchise_data, search_title)
+        franchise_data["_backdrop_url"] = backdrop_path
+
         await fsm.set(
             q.from_user.id, STATE_FRANCHISE,
             franchise=franchise_data, query=query,
         )
-        screen = confirm_franchise(franchise_data)
+        screen = confirm_franchise(franchise_data, backdrop_path=backdrop_path)
         await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
         await q.answer()
 
@@ -243,7 +257,6 @@ def register(client: Client, container: Container) -> None:
         *,
         query: str,
     ) -> None:
-        from nekofetch.services.queue_service import QueueService
         from nekofetch.services.request_service import RequestService
 
         title = franchise_data.get("title", query)
@@ -289,14 +302,9 @@ def register(client: Client, container: Container) -> None:
             return
         await fsm.clear(user_id)
 
-        # Admin users auto-queue; regular users wait for staff review
-        is_admin = user_id in container.env.admin_ids
-        if is_admin:
-            try:
-                await QueueService(container).enqueue(receipt.code)
-            except NekoFetchError:
-                pass
-
+        # Every request now flows through staff source-assignment (the control-center
+        # request card). We never auto-queue here — a franchise request carries the
+        # "anilist" discovery tag, which is not a downloadable source on its own.
         screen = request_received(user_name, title, queue_pos=receipt.position)
         await send_screen(client, card_msg.chat.id, screen, old_msg=card_msg)
 
@@ -322,19 +330,75 @@ def register(client: Client, container: Container) -> None:
     # ── Home (back/welcome navigation) ──
     @client.on_callback_query(filters.regex(r"^(home)$"))
     async def _home(_: Client, q: CallbackQuery) -> None:
+        from nekofetch.domain.enums import Role
         from nekofetch.ui.screens import welcome as welcome_screen
 
         name = q.from_user.first_name or ""
-        screen = welcome_screen(name)
+        user = getattr(q, "nf_user", None)
+        role = Role(user.role) if user else Role.USER
+        screen = welcome_screen(
+            name,
+            is_staff=role in (Role.STAFF, Role.ADMIN),
+            is_admin=role is Role.ADMIN,
+        )
         await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
         await q.answer()
 
     # ── Helper ────────────────────────────────────────────────────────────────────
 
+    async def _enrich_with_tmdb(franchise_data: dict, search_title: str) -> str | None:
+        """Layer TMDB presentation assets onto an AniList-built franchise dict.
+
+        Division of labour:
+          * AniList owns titles, relations, episode/season counts, structure.
+          * TMDB owns the franchise-level **synopsis** (its overview describes the
+            whole adaptation, not one season) and the English 16:9 **backdrop**.
+
+        TMDB synopsis wins whenever it returns usable text; otherwise we keep the
+        AniList description already in ``franchise_data``. Returns the backdrop URL
+        (English-tagged when available) or ``None``.
+        """
+        try:
+            match = await container.tmdb.search(search_title)
+        except Exception:
+            return None
+        if not match:
+            return None
+        if match.overview and match.overview.strip():
+            franchise_data["synopsis"] = match.overview
+            franchise_data["synopsis_url"] = (
+                f"https://www.themoviedb.org/{match.media_type}/{match.id}"
+            )
+        return match.backdrop_url
+
+    async def _apply_franchise_totals(franchise_data: dict) -> None:
+        """Replace the immediate-children breakdown with totals computed across the
+        whole AniList relation graph (every season/cour/movie/OVA/special/ONA)."""
+        anilist_id = franchise_data.get("anilist_id")
+        if not anilist_id:
+            return
+        try:
+            totals = await container.anilist.franchise_totals(int(anilist_id))
+        except Exception:
+            return
+        franchise_data.update(
+            franchise_seasons=totals.seasons,
+            franchise_episodes=totals.episodes or None,
+            franchise_movies=totals.movies,
+            franchise_ovas=totals.ovas,
+            franchise_onas=totals.onas,
+            franchise_specials=totals.specials,
+            franchise_spinoffs=totals.spin_offs,
+        )
+
+
 def _media_to_franchise_dict(media) -> dict:
     """Convert an AnilistMedia into the dict shape `confirm_franchise` expects."""
+    english = media.english or (media.titles[0] if media.titles else "Unknown")
     return {
-        "title": media.titles[0] if media.titles else "Unknown",
+        "title": english,
+        "english": english,
+        "romaji": media.romaji,
         "year": media.year,
         "format": media.format,
         "status": media.status,
@@ -342,6 +406,7 @@ def _media_to_franchise_dict(media) -> dict:
         "studio": media.studio,
         "genres": media.genres,
         "synopsis": media.synopsis,
+        "synopsis_url": media.anilist_url,
         "franchise_episodes": media.franchise_episodes,
         "franchise_seasons": media.franchise_seasons,
         "franchise_movies": media.franchise_movies,

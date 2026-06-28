@@ -1,11 +1,14 @@
 """Text formatting helpers — HTML only.
 
-Emphasis comes from real HTML tags (Telegram HTML parse mode), not unicode
-"small caps"/"bold serif" tricks. Bold is the default for anything that matters;
-italic for secondary notes. No ``<code>`` for ordinary text.
+Emphasis comes from real HTML tags (Telegram HTML parse mode). Bold is the
+default for anything that matters; italic for secondary notes. No ``<code>`` for
+ordinary prose. Structural marks (rules, dots, arrows) come from
+:mod:`nekofetch.core.constants` so the whole UI shares one visual language.
 """
 
 from __future__ import annotations
+
+from nekofetch.core.constants import RULE, RULE_HEAVY, RULE_SOFT
 
 
 def b(text: str) -> str:
@@ -34,13 +37,11 @@ def field(label: str, value: str) -> str:
     return f"<b>{label}:</b> {value}"
 
 
-# ── Deprecated shims ──
-# Former unicode-styling helpers. Kept as identity passthroughs so existing
-# imports keep working while call sites migrate to plain text + <b>/<i>.
-# They intentionally do NOT transform text any more.
-def small_caps(text: str) -> str:  # noqa: D401 - deprecated, identity
-    return text
+def rule(style: str = "thin") -> str:
+    """A horizontal divider. ``style`` ∈ {thin, soft, heavy}."""
+    return {"thin": RULE, "soft": RULE_SOFT, "heavy": RULE_HEAVY}.get(style, RULE)
 
 
-def bold_serif(text: str) -> str:  # noqa: D401 - deprecated, identity
-    return text
+def section(icon: str, title: str) -> str:
+    """A section header: ``<icon>  <b>Title</b>`` over a thin rule."""
+    return f"{icon}  <b>{title}</b>\n<i>{RULE}</i>"

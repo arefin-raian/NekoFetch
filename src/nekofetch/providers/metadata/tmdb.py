@@ -121,7 +121,19 @@ class TmdbClient:
         return res
 
     async def _english_backdrop(self, tmdb_id: int, media_type: str) -> str | None:
-        """Pick the best English (then language-neutral) backdrop path."""
+        """Pick the best **English-tagged** backdrop, the way TMDB's
+        ``/images/backdrops?image_language=en`` page shows them.
+
+        These are the franchise backdrops that carry English title art / branding,
+        which we want on the confirmation card. Strict preference order:
+
+          1. images explicitly tagged ``iso_639_1 == "en"`` (highest quality first),
+          2. language-neutral images (``null``) as a graceful fallback,
+          3. anything else only as a last resort.
+
+        Within each tier we rank by rating, then vote count, then resolution, so a
+        zero-vote English backdrop still beats a popular neutral one.
+        """
         try:
             imgs = await self._get(f"/{media_type}/{tmdb_id}/images",
                                    include_image_language="en,null")
@@ -130,8 +142,18 @@ class TmdbClient:
         backdrops = imgs.get("backdrops", [])
         if not backdrops:
             return None
-        en = [b for b in backdrops if b.get("iso_639_1") == "en"]
-        neutral = [b for b in backdrops if b.get("iso_639_1") in (None, "")]
-        pool = en or neutral or backdrops
-        pool.sort(key=lambda b: b.get("vote_average", 0), reverse=True)
-        return pool[0].get("file_path")
+
+        def quality(b: dict) -> tuple:
+            return (b.get("vote_average") or 0,
+                    b.get("vote_count") or 0,
+                    b.get("width") or 0)
+
+        english = sorted((b for b in backdrops if b.get("iso_639_1") == "en"),
+                         key=quality, reverse=True)
+        if english:
+            return english[0].get("file_path")
+        neutral = sorted((b for b in backdrops if not b.get("iso_639_1")),
+                         key=quality, reverse=True)
+        if neutral:
+            return neutral[0].get("file_path")
+        return sorted(backdrops, key=quality, reverse=True)[0].get("file_path")
