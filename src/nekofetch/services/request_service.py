@@ -124,6 +124,15 @@ class RequestService:
         )
         return req
 
+    async def update_source_ref(self, code: str, source: str, source_ref: str) -> None:
+        """Pin a request to a specific source + native ref (e.g. a chosen torrent)."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            req.source = source
+            req.source_ref = source_ref
+
     async def reject(self, code: str) -> Request:
         """Mark a request rejected; logged to the log channel."""
         async with session_scope(self._c.pg_sessionmaker) as session:

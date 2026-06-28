@@ -72,7 +72,44 @@ class PublishingService:
             .all()
         )
 
+    async def upload_to_storage(self, code: str) -> int:
+        """Upload a request's processed files to the storage (DB) channel as packs.
+
+        This is **automatic** — it runs straight after processing, independent of
+        the main-channel publish/approval gate. Putting verified files into the
+        database channel is just part of the pipeline; "publishing" (posting to the
+        main channel, index, etc.) is a separate, deliberate action.
+        """
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            files = await self._files_for_request(session, req.id)
+            # Only upload files that passed verification — never push corrupt media.
+            files = [f for f in files if f.local_path and f.verified]
+            anime_doc_id = req.anime_doc_id or req.source_ref
+            title = req.anime_title
+            snapshot = [
+                {"season": f.season, "episode": f.episode, "resolution": f.resolution,
+                 "audio": f.audio, "path": f.local_path}
+                for f in files
+            ]
+
+        await self._upload_packs(anime_doc_id, title, snapshot)
+
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "download", "stored", code=code, anime=title, files=len(snapshot),
+        )
+        return len(snapshot)
+
     async def publish(self, code: str) -> int:
+        """Make stored content user-visible: post to the main channel + index.
+
+        Packs are already in the database channel (auto-uploaded after processing);
+        this step is the deliberate, separate "go live" action.
+        """
         async with session_scope(self._c.pg_sessionmaker) as session:
             req = await RequestRepository(session).get_by_code(code)
             if req is None:
@@ -85,18 +122,15 @@ class PublishingService:
             count = len(files)
             anime_doc_id = req.anime_doc_id or req.source_ref
             title = req.anime_title
-            snapshot = [
-                {"season": f.season, "episode": f.episode, "resolution": f.resolution,
-                 "audio": f.audio, "path": f.local_path}
-                for f in files if f.local_path
-            ]
+            first = next((f for f in files if f.local_path), None)
+            res = first.resolution if first else None
+            aud = first.audio.value if first and first.audio else None
 
         from nekofetch.services.analytics_service import AnalyticsService
 
         await AnalyticsService(self._c).record(
             "publish", anime_doc_id=anime_doc_id, data={"code": code, "files": count}
         )
-        await self._upload_packs(anime_doc_id, title, snapshot)
 
         from nekofetch.services.index_channel_service import IndexChannelService
         from nekofetch.services.main_channel_service import MainChannelService
@@ -110,8 +144,7 @@ class PublishingService:
 
         await LogChannelService(self._c).event(
             "publish", "approved", code=code, anime=title, files=count,
-            audio=snapshot[0].get("audio") if snapshot else None,
-            resolution=snapshot[0].get("resolution") if snapshot else None,
+            audio=aud, resolution=res,
         )
 
         if user_id:

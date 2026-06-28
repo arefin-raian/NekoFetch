@@ -76,15 +76,19 @@ class DownloadWorker:
         async with session_scope(self._c.pg_sessionmaker) as session:
             job = await session.get(DownloadJob, job_id)
             req = await RequestRepository(session).get(job.request_id)
-            source = self._c.sources.resolve(req.source)
-            episodes = await source.get_episodes(req.source_ref)
-            if req.season is not None:
-                episodes = [e for e in episodes if e.season == req.season]
-            if req.episodes:
-                episodes = [e for e in episodes if e.number in set(req.episodes)]
             job.started_at = _now()
+            session.expunge(req)  # detach so we can use it after the session closes
+
+        # Resolve the actual download source + episode list, honoring website
+        # priority chains with fallback (try the preferred site, then the other).
+        source, episodes = await self._resolve_source_and_episodes(req)
+        if req.season is not None:
+            episodes = [e for e in episodes if e.season == req.season]
+        if req.episodes:
+            episodes = [e for e in episodes if e.number in set(req.episodes)]
 
         audios = self._target_audios(req)
+        folder = _safe_folder(req)
 
         for ep in episodes:
             variants = await source.get_variants(ep.source_ref)
@@ -95,7 +99,18 @@ class DownloadWorker:
             if req.resolution:
                 avail_resolutions = [r for r in avail_resolutions if r == req.resolution]
             for resolution in avail_resolutions:
+                has_native_dual = any(
+                    v.audio == AudioType.DUAL_AUDIO and v.resolution == resolution
+                    for v in variants
+                )
                 for audio in audios:
+                    # Dual requested but the source (AniKoto) has no native dual
+                    # track — try to build one from its separate sub+dub streams.
+                    if (audio == AudioType.DUAL_AUDIO and not has_native_dual
+                            and hasattr(source, "dual_audio_plan")):
+                        await self._acquire_dual(source, req, ep, resolution, folder,
+                                                 job_id, cfg)
+                        continue
                     variant = _select_variant(
                         variants, resolution, audio, self._c.config.acquisition.require_english_subs
                     )
@@ -105,7 +120,7 @@ class DownloadWorker:
                     dest = (
                         self._c.env.storage_path
                         / "work"
-                        / f"{req.source_ref}"
+                        / folder
                         / f"S{ep.season:02d}E{ep.number:03d}_{variant.resolution}_{variant.audio.value}"
                         f".{variant.container or 'mkv'}"
                     )
@@ -146,6 +161,97 @@ class DownloadWorker:
                     await self._record_file(job_id, req, ep, variant, dest, result)
 
         await self._complete(job_id)
+
+    async def _resolve_source_and_episodes(self, req):
+        """Resolve a request to a live source + episode list.
+
+        Requests carry an AniList discovery ref (``anilist:<id>``), so we search
+        each candidate source by title to find its native id, then list episodes.
+        Website priority chains (``anikoto>kickassanime``) are tried in order with
+        fallback — the first source that yields episodes wins.
+        """
+        from nekofetch.core.exceptions import NotFound
+        from nekofetch.sources.registry import _ALIASES
+
+        fr = req.franchise_data or {}
+        title = fr.get("english") or fr.get("title") or req.anime_title
+
+        raw = req.source or ""
+        if ">" in raw:                          # website priority chain
+            names = [_ALIASES.get(tok.strip(), tok.strip()) for tok in raw.split(">")]
+        else:
+            try:
+                names = [self._c.sources.resolve(raw).name]
+            except Exception:
+                names = []
+        names = [n for n in names if n and n != "anilist"]
+
+        last_err: str | None = None
+        for name in names:
+            try:
+                src = self._c.sources.get(name)
+            except Exception:
+                continue
+            try:
+                ref = req.source_ref
+                if not ref or ref.startswith("anilist:"):
+                    stubs = await src.search(title)
+                    if not stubs:
+                        last_err = f"{name}: no match"
+                        continue
+                    ref = stubs[0].source_ref
+                episodes = await src.get_episodes(ref)
+                if episodes:
+                    log.info("download.source.resolved", source=name, episodes=len(episodes))
+                    return src, episodes
+                last_err = f"{name}: no episodes"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("download.source.failed", source=name, error=str(exc))
+                last_err = f"{name}: {exc}"
+        raise NotFound(f"no source could provide episodes for {title!r} ({last_err})")
+
+    async def _acquire_dual(self, source, req, ep, resolution, folder, job_id, cfg) -> None:
+        """Build a dual-audio result from a sub-only source (AniKoto).
+
+        Checks mergeability without downloading the videos. If the sub and dub are
+        the same cut, both are downloaded and remuxed into one dual-audio file;
+        otherwise they're kept as separate sub + dub files (still a valid result).
+        """
+        from nekofetch.sources._dualaudio import merge_dual
+
+        plan = await source.dual_audio_plan(ep.source_ref)
+        if not plan.get("feasible"):
+            return
+        sub_v, dub_v = plan["sub_variant"], plan["dub_variant"]
+        base = self._c.env.storage_path / "work" / folder
+        base.mkdir(parents=True, exist_ok=True)
+        stem = f"S{ep.season:02d}E{ep.number:03d}_{resolution}"
+        sub_dest = base / f"{stem}_subbed.mkv"
+        dub_dest = base / f"{stem}_dubbed.mkv"
+
+        sr = await self._download_with_retry(source, sub_v, sub_dest, None,
+                                             cfg.retry_attempts, cfg.retry_backoff_seconds)
+        dr = await self._download_with_retry(source, dub_v, dub_dest, None,
+                                             cfg.retry_attempts, cfg.retry_backoff_seconds)
+
+        if plan.get("mergeable"):
+            dual_dest = base / f"{stem}_dual_audio.mkv"
+            if await merge_dual(sub_dest, dub_dest, dual_dest):
+                from nekofetch.sources.base import VideoVariant
+                dual_v = VideoVariant(source_ref="", resolution=resolution,
+                                      audio=AudioType.DUAL_AUDIO, container="mkv")
+                size = dual_dest.stat().st_size if dual_dest.exists() else 0
+                await self._record_file(job_id, req, ep, dual_v, dual_dest,
+                                        {"bytes": size})
+                sub_dest.unlink(missing_ok=True)
+                dub_dest.unlink(missing_ok=True)
+                log.info("dualaudio.merged", episode=ep.number, resolution=resolution)
+                return
+
+        # Not the same cut (or merge failed) → keep separate sub + dub.
+        await self._record_file(job_id, req, ep, sub_v, sub_dest, sr)
+        await self._record_file(job_id, req, ep, dub_v, dub_dest, dr)
+        log.info("dualaudio.separate", episode=ep.number, resolution=resolution)
 
     def _target_audios(self, req) -> list[AudioType]:
         """Resolve the audio types (subbed/dubbed) to acquire for a request.
@@ -230,6 +336,11 @@ class DownloadWorker:
                 "processing", "complete", job=job_id, notes=len(ctx.notes),
                 stages=",".join(ctx.notes) if ctx.notes else None,
             )
+            # Auto-upload the verified packs to the storage (database) channel — this
+            # is part of the pipeline, NOT the separate main-channel "publish".
+            if code:
+                from nekofetch.services.publishing_service import PublishingService
+                await PublishingService(self._c).upload_to_storage(code)
             if user_id:
                 from nekofetch.services.notification_service import NotificationService
                 await NotificationService(self._c).processing_complete(user_id, title, code, needs_approval=needs_approval)
@@ -261,6 +372,14 @@ class DownloadWorker:
             "error", "download_failed", job=job_id, error=str(exc),
             anime=title, code=code,
         )
+
+
+def _safe_folder(req) -> str:
+    """A filesystem-safe work folder name for a request (no colons/slashes)."""
+    import re
+
+    base = req.anime_doc_id or req.code or req.source_ref or "work"
+    return re.sub(r"[^\w.\-]+", "_", str(base)).strip("_") or "work"
 
 
 def _audio_for_language(language: str) -> AudioType | None:

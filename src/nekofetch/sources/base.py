@@ -62,6 +62,29 @@ class VideoVariant:
     size_bytes: int | None = None
 
 
+@dataclass(slots=True)
+class SourceCoverage:
+    """A cheap per-source summary used by the Website report card so staff can
+    compare sources before committing a download.
+
+    ``sub_episodes`` / ``dub_episodes`` are how many episodes each audio actually
+    offers — this is where sources diverge wildly (e.g. 220 subbed but 3 dubbed).
+    ``approximate`` flags counts derived from sampling rather than a full listing.
+    """
+
+    source: str
+    matched_title: str
+    source_ref: str
+    total_episodes: int = 0
+    seasons: int = 1
+    sub_episodes: int = 0
+    dub_episodes: int = 0
+    dual_episodes: int = 0
+    available: bool = True
+    approximate: bool = False
+    note: str | None = None
+
+
 # Called repeatedly during a download with (downloaded_bytes, total_bytes).
 ProgressCallback = Callable[[int, int], Awaitable[None]]
 
@@ -103,6 +126,15 @@ class AnimeSource(ABC):
         download can continue. Should invoke ``on_progress`` periodically. Returns the
         final resume/metadata state (e.g. checksum, bytes written).
         """
+
+    async def coverage(self, query: str) -> SourceCoverage | None:
+        """Cheap per-source summary for ``query`` used by the Website report card.
+
+        Sources that can't (or needn't) provide one return ``None``. Website
+        sources override this to report episode totals + sub/dub availability so
+        staff can compare before downloading.
+        """
+        return None
 
     async def close(self) -> None:  # pragma: no cover - optional cleanup hook
         """Release any held resources (HTTP clients, handles)."""

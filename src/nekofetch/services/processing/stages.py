@@ -31,6 +31,38 @@ async def _run(*args: str) -> tuple[int, str]:
     return proc.returncode or 0, err.decode(errors="ignore")
 
 
+async def _ffprobe_ok(ffprobe: str, path: Path) -> tuple[bool, str]:
+    """Decode-probe a media file. A non-corrupt file parses cleanly, has at least
+    one video stream, and a positive duration. Returns (ok, reason)."""
+    import json
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            ffprobe, "-v", "error", "-of", "json",
+            "-show_format", "-show_streams", str(path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"probe error: {exc}"
+    if proc.returncode != 0:
+        return False, (err.decode(errors="ignore").strip()[:120] or "ffprobe error")
+    try:
+        data = json.loads(out or b"{}")
+    except ValueError:
+        return False, "unparseable ffprobe output"
+    streams = data.get("streams", [])
+    if not any(s.get("codec_type") == "video" for s in streams):
+        return False, "no video stream"
+    try:
+        duration = float(data.get("format", {}).get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration <= 0:
+        return False, "zero/unknown duration"
+    return True, "ok"
+
+
 class VerifyStage(Stage):
     stage = ProcessingStage.VERIFY
 
@@ -38,14 +70,29 @@ class VerifyStage(Stage):
         return self.c.config.processing.verify_files
 
     async def process(self, ctx: StageContext) -> None:
+        from nekofetch.core.exceptions import ProcessingError
+        from nekofetch.sources._hls import find_ffprobe
+
+        ffprobe = find_ffprobe()
+        corrupt: list[str] = []
         for f in ctx.files:
             path = Path(f.local_path) if f.local_path else None
-            ok = bool(path and path.exists() and path.stat().st_size > 0)
-            if ok and f.size_bytes:
-                ok = path.stat().st_size == f.size_bytes
+            if not (path and path.exists() and path.stat().st_size > 0):
+                f.verified = False
+                corrupt.append(f"{Path(f.local_path).name if f.local_path else '?'}: missing/empty")
+                continue
+            if ffprobe:
+                ok, reason = await _ffprobe_ok(ffprobe, path)
+            else:  # no ffprobe — fall back to a size-only check, can't prove corrupt
+                ok, reason = True, "ffprobe unavailable (size-only check)"
+                ctx.notes.append("verify: ffprobe unavailable, size-only check")
             f.verified = ok
             if not ok:
-                ctx.notes.append(f"verify failed: {f.local_path}")
+                corrupt.append(f"{path.name}: {reason}")
+        # Corrupt files must never reach the database channel — fail the whole job
+        # so it's surfaced and can be retried, rather than silently shipping garbage.
+        if corrupt:
+            raise ProcessingError("corrupt file(s): " + "; ".join(corrupt[:5]))
 
 
 class RenameStage(Stage):

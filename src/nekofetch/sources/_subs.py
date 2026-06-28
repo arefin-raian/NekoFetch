@@ -189,7 +189,7 @@ _VTT_STYLE = (
     "}\n"
     "::cue(.tg) { color: " + TG_BLUE_HEX + "; font-weight: bold; }\n"
     "::cue(.handle) { color: #FFFFFF; font-weight: bold; }\n"
-    "::cue(.brand) { font-size: 1.4em; }\n\n"
+    "::cue(.brand) { font-size: 1.2em; }\n\n"
 )
 
 
@@ -228,7 +228,7 @@ _ASS_STYLE_DEFAULT = (
     "&H80000000,0,0,0,0,100,100,0,0,1,2,1,2,80,80,40,1"
 )
 _ASS_STYLE_BRAND = (
-    "Style: Brand,Trebuchet MS,72,&H00FFFFFF,&H000000FF,&H00000000,"
+    "Style: Brand,Trebuchet MS,64,&H00FFFFFF,&H000000FF,&H00000000,"
     "&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,80,80,60,1"
 )
 _ASS_HEADER = (

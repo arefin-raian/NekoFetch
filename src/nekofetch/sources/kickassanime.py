@@ -44,6 +44,7 @@ from nekofetch.sources.base import (
     AnimeStub,
     Episode,
     ProgressCallback,
+    SourceCoverage,
     VideoVariant,
 )
 
@@ -305,6 +306,55 @@ class KickAssAnimeSource(AnimeSource):
             return data.get("result", [])
         except httpx.HTTPError:
             return ["ja-JP"]
+
+    async def _episode_numbers(self, slug: str, lang: str) -> set[int]:
+        """Episode numbers available for one audio language (cheap listing call)."""
+        nums: set[int] = set()
+        page = 1
+        while True:
+            try:
+                resp = await self.http.get(
+                    f"{self.api_url}/{slug}/episodes?page={page}&lang={lang}"
+                )
+            except httpx.HTTPError:
+                break
+            if resp.status_code != 200:
+                break
+            data = resp.json()
+            result = data.get("result", [])
+            if not result:
+                break
+            for ep in result:
+                s = ep.get("episode_string", "")
+                if s.replace(".", "", 1).isdigit():
+                    nums.add(int(float(s)))
+            pages = data.get("pages", [])
+            if page >= len(pages):
+                break
+            page += 1
+        return nums
+
+    async def coverage(self, query: str) -> SourceCoverage:
+        """Per-language episode counts — exposes sub/dub variance directly."""
+        stubs = await self.search(query)
+        if not stubs:
+            return SourceCoverage(source=self.name, matched_title=query,
+                                  source_ref="", available=False, note="no match")
+        stub = stubs[0]
+        slug = stub.source_ref.strip("/")
+        langs = await self._fetch_languages(slug)
+        per_lang: dict[str, set[int]] = {}
+        for lang in langs:
+            per_lang[lang] = await self._episode_numbers(slug, lang)
+        all_nums: set[int] = set().union(*per_lang.values()) if per_lang else set()
+        sub = sum(len(n) for lg, n in per_lang.items() if lg.lower().startswith("ja"))
+        dub = sum(len(n) for lg, n in per_lang.items() if lg.lower().startswith("en"))
+        return SourceCoverage(
+            source=self.name, matched_title=stub.title, source_ref=slug,
+            total_episodes=len(all_nums), seasons=1,
+            sub_episodes=sub, dub_episodes=dub,
+            available=bool(all_nums),
+        )
 
     async def get_variants(self, episode_ref: str) -> list[VideoVariant]:
         slug, ep_path = episode_ref.split("/", 1) if "/" in episode_ref else (episode_ref, "")

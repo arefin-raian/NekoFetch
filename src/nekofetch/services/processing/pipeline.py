@@ -63,12 +63,10 @@ class ProcessingPipeline:
                     )
                     raise ProcessingError(f"{stage.stage.value}: {exc}") from exc
 
-            if self._c.config.processing.require_approval_before_publish:
-                req.status = RequestStatus.READY
-            else:
-                req.status = RequestStatus.PUBLISHED
-                for f in files:
-                    f.published = True
+            # Processing done → READY. Uploading the verified packs to the storage
+            # (database) channel happens automatically right after (see the worker);
+            # going live on the *main* channel ("publish") is a separate action.
+            req.status = RequestStatus.READY
 
         log.info("processing.complete", job_id=job_id, notes=len(ctx.notes))
         return ctx

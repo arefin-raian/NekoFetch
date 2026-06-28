@@ -26,10 +26,32 @@ from nekofetch.sources.base import (
     AnimeStub,
     Episode,
     ProgressCallback,
+    SourceCoverage,
     VideoVariant,
 )
 
 log = get_logger(__name__)
+
+
+def _rank_by_title(query: str, results: list[AnimeStub]) -> list[AnimeStub]:
+    """Re-order site results by title relevance, not raw popularity.
+
+    The site sorts by views, so a viral recap ("Road of Naruto") can outrank the
+    real series for a query like "Naruto". We prefer an exact title match, then
+    word overlap, keeping the site's order as a stable tiebreak.
+    """
+    from nekofetch.sources.telegram.matching import normalize_words
+
+    q = normalize_words(query)
+    nq = query.strip().lower()
+
+    def key(stub: AnimeStub) -> tuple[int, float]:
+        c = normalize_words(stub.title)
+        exact = stub.title.strip().lower() == nq
+        overlap = (len(q & c) / len(q)) if q else 0.0
+        return (1 if exact else 0, overlap)
+
+    return sorted(results, key=key, reverse=True)
 
 BASE_URL = "https://anikototv.to"
 MAPPER_API = "https://mapper.nekostream.site/api/mal/"
@@ -88,6 +110,7 @@ class AnikotoSource(AnimeSource):
             return await self._popular()
 
         results = self._parse_item_grid(BeautifulSoup(resp.text, "html.parser"))
+        results = _rank_by_title(query, results)
         return results or await self._popular()
 
     def _parse_item_grid(self, soup: BeautifulSoup) -> list[AnimeStub]:
@@ -221,6 +244,57 @@ class AnikotoSource(AnimeSource):
 
         return episodes
 
+    async def coverage(self, query: str) -> SourceCoverage:
+        """Exact episode total + a sampled sub/dub estimate.
+
+        AniKoto resolves audio per-episode, so an exact sub/dub split would mean
+        probing every episode. Instead we sample a handful spread across the run
+        (first / middle / last …) and extrapolate — enough to surface gross
+        variance (e.g. dub only on the first few episodes). Marked approximate.
+        """
+        from nekofetch.domain.enums import AudioType
+
+        stubs = await self.search(query)
+        if not stubs:
+            return SourceCoverage(source=self.name, matched_title=query,
+                                  source_ref="", available=False, note="no match")
+        stub = stubs[0]
+        try:
+            eps = await self.get_episodes(stub.source_ref)
+        except Exception:
+            eps = []
+        total = len(eps)
+        if not total:
+            return SourceCoverage(source=self.name, matched_title=stub.title,
+                                  source_ref=stub.source_ref, available=False,
+                                  note="no episodes")
+        # Evenly spaced sample (cap at 5) for an audio-availability estimate.
+        k = min(5, total)
+        idxs = sorted({round(i * (total - 1) / (k - 1)) for i in range(k)}) if k > 1 else [0]
+        sub_hits = dub_hits = sampled = 0
+        for i in idxs:
+            try:
+                variants = await self.get_variants(eps[i].source_ref)
+            except Exception:
+                continue
+            sampled += 1
+            audios = {v.audio for v in variants}
+            if AudioType.SUBBED in audios:
+                sub_hits += 1
+            if AudioType.DUBBED in audios:
+                dub_hits += 1
+        if sampled == 0:
+            return SourceCoverage(source=self.name, matched_title=stub.title,
+                                  source_ref=stub.source_ref, total_episodes=total,
+                                  approximate=True, note="audio resolved per-episode")
+        return SourceCoverage(
+            source=self.name, matched_title=stub.title, source_ref=stub.source_ref,
+            total_episodes=total, seasons=1,
+            sub_episodes=round(total * sub_hits / sampled),
+            dub_episodes=round(total * dub_hits / sampled),
+            approximate=True, available=True,
+        )
+
     async def get_variants(self, episode_ref: str) -> list[VideoVariant]:
         parts = episode_ref.split("/")
         if len(parts) < 4:
@@ -270,6 +344,47 @@ class AnikotoSource(AnimeSource):
                 )
             )
         return variants
+
+    async def dual_audio_plan(self, episode_ref: str) -> dict:
+        """Assess whether one dual-audio file can be built for this episode.
+
+        AniKoto has no native dual track, so we check — *without downloading the
+        videos* — whether the sub and dub streams are the same cut (matching
+        runtime). If so they can be merged into one dual file; if not, they must
+        stay as separate sub and dub. Returns the variants + the verdict.
+        """
+        from nekofetch.sources._dualaudio import are_mergeable, playlist_duration
+
+        variants = await self.get_variants(episode_ref)
+        sub = next((v for v in variants if v.audio == AudioType.SUBBED), None)
+        dub = next((v for v in variants if v.audio == AudioType.DUBBED), None)
+        if not (sub and dub):
+            return {"feasible": False, "mergeable": False,
+                    "reason": "missing sub or dub", "sub_variant": sub, "dub_variant": dub}
+
+        def _first_candidate(v: VideoVariant) -> dict | None:
+            try:
+                cands = json.loads(v.source_ref).get("candidates", [])
+                return cands[0] if cands else None
+            except (json.JSONDecodeError, IndexError):
+                return None
+
+        async def _dur(v: VideoVariant) -> float | None:
+            cand = _first_candidate(v)
+            if not cand or not cand.get("video_url"):
+                return None
+            # AniKoto's m3u8 must be fetched with the embed host root as referer.
+            ref = cand.get("referer") or f"{self.base_url}/"
+            headers = {"referer": ref, "origin": ref.rstrip("/")}
+            return await playlist_duration(self.http, cand["video_url"], headers)
+
+        d_sub = await _dur(sub)
+        d_dub = await _dur(dub)
+        return {
+            "feasible": True, "mergeable": are_mergeable(d_sub, d_dub),
+            "sub_variant": sub, "dub_variant": dub,
+            "sub_dur": d_sub, "dub_dur": d_dub,
+        }
 
     async def _collect_mapper(self, data_mal, episode_ref, data_timestamp, add) -> None:
         """Kiwi/mapper servers — usually soft-sub + dub HLS streams."""

@@ -15,6 +15,7 @@ from nekofetch.ui.screens import show
 
 PAGE_SIZE = 8
 STATE_MANUAL = "staff:await_manual"
+STATE_TORRENT = "staff:torrent_pick"
 
 
 def register(client: Client, container: Container) -> None:
@@ -105,7 +106,6 @@ def register(client: Client, container: Container) -> None:
         if not _allowed(q, Permission.QUEUE_DOWNLOADS):
             await q.answer(L(M.ACCESS_DENIED), show_alert=True)
             return
-        from nekofetch.services.queue_service import QueueService
         from nekofetch.services.request_service import RequestService
 
         parts = q.data.split("|", 3)
@@ -122,9 +122,23 @@ def register(client: Client, container: Container) -> None:
             return
 
         if chosen_source == "website":
-            # Website sources always process the ENTIRE franchise, never a season.
+            # Website sources always process the ENTIRE franchise. Before picking a
+            # provider we analyse BOTH and present a report so the choice is informed.
             await q.answer()
-            caption = f"{L(M.SITE_PREFERENCE_TITLE)}\n\n{L(M.SITE_PREFERENCE_PROMPT)}"
+            from nekofetch.services.website_report import build_website_report
+            from nekofetch.ui.website_report import render_report
+
+            try:
+                req = await RequestService(container).get(code)
+            except NekoFetchError:
+                await q.answer(L(M.ERR_GENERIC), show_alert=True)
+                return
+            franchise = req.franchise_data or {}
+            title = franchise.get("title") or req.anime_title
+            back = keyboard([(L(M.BTN_BACK), cb("staff", "rdetail", code))])
+            # 1) loading state, 2) build report, 3) report card with picker buttons.
+            loading = await show(client, q.message, L(M.WEB_REPORT_LOADING, title=title), back)
+            report = await build_website_report(container, title=title, franchise=franchise)
             kb = keyboard(
                 [(L(M.SITE_BTN_ANIKOTO_PRIMARY),
                   cb("staff", "rsiteprio", code, "anikoto", "kickassanime")),
@@ -132,18 +146,96 @@ def register(client: Client, container: Container) -> None:
                   cb("staff", "rsiteprio", code, "kickassanime", "anikoto"))],
                 [(L(M.BTN_BACK), cb("staff", "rdetail", code))],
             )
-            await show(client, q.message, caption, kb)
+            await show(client, loading, render_report(report), kb)
             return
 
-        # Torrent: torrent packs are already complete — assign and queue directly.
+        # Torrent: present a seeders-ranked, dual-audio-first picker (with auto-pick).
+        await q.answer()
         try:
-            await RequestService(container).update_source(code, chosen_source)
+            req = await RequestService(container).get(code)
+        except NekoFetchError:
+            await q.answer(L(M.ERR_GENERIC), show_alert=True)
+            return
+        title = (req.franchise_data or {}).get("title") or req.anime_title
+        back = keyboard([(L(M.BTN_BACK), cb("staff", "rdetail", code))])
+        loading = await show(client, q.message, L(M.TORRENT_LOADING, title=title), back)
+        try:
+            stubs = (await container.sources.get("nyaa").search(title))[:24]
+        except Exception:
+            stubs = []
+        if not stubs:
+            await show(client, loading, L(M.TORRENT_EMPTY, title=title), back)
+            return
+        cands = [{"ref": s.source_ref, "label": s.title} for s in stubs]
+        await fsm.set(q.from_user.id, STATE_TORRENT, code=code, title=title, cands=cands)
+        await _render_torrent_page(loading, code, cands, 0, title)
+
+    _TPAGE = 6
+
+    async def _render_torrent_page(msg, code: str, cands: list[dict],
+                                   page: int, title: str) -> None:
+        start = page * _TPAGE
+        page_items = cands[start:start + _TPAGE]
+        rows = [[(L(M.TORRENT_BTN_AUTO), cb("staff", "rtauto", code))]]
+        for i, c in enumerate(page_items, start=start):
+            rows.append([(c["label"][:48], cb("staff", "rtpick", code, i))])
+        nav = []
+        if page > 0:
+            nav.append((L(M.BTN_PREV), cb("staff", "rtpage", code, page - 1)))
+        if start + _TPAGE < len(cands):
+            nav.append((L(M.BTN_NEXT), cb("staff", "rtpage", code, page + 1)))
+        if nav:
+            rows.append(nav)
+        rows.append([(L(M.BTN_BACK), cb("staff", "rdetail", code))])
+        caption = f"{L(M.TORRENT_TITLE, title=title)}\n\n{L(M.TORRENT_INTRO, n=len(cands))}"
+        await show(client, msg, caption, keyboard(*rows))
+
+    async def _torrent_queue(q: CallbackQuery, idx: int) -> None:
+        from nekofetch.services.queue_service import QueueService
+        from nekofetch.services.request_service import RequestService
+
+        _, data = await fsm.get(q.from_user.id)
+        cands = data.get("cands", [])
+        code = data.get("code")
+        if not code or idx >= len(cands):
+            await q.answer(L(M.ERR_GENERIC), show_alert=True)
+            return
+        chosen = cands[idx]
+        try:
+            await RequestService(container).update_source_ref(code, "nyaa", chosen["ref"])
             job_id = await QueueService(container).enqueue(code)
         except NekoFetchError as exc:
             await q.answer(getattr(exc, "detail", None) or L(M.ERR_GENERIC), show_alert=True)
             return
-        await q.answer(L(M.TOAST_QUEUED, source=chosen_source, job=job_id), show_alert=True)
+        await fsm.clear(q.from_user.id)
+        await q.answer(L(M.TORRENT_QUEUED, title=f"job #{job_id}"), show_alert=True)
         await _render_list(q, 0)
+
+    @client.on_callback_query(filters.regex(r"^staff\|rtpage"))
+    async def _torrent_page(_: Client, q: CallbackQuery) -> None:
+        if not _allowed(q, Permission.QUEUE_DOWNLOADS):
+            await q.answer(L(M.ACCESS_DENIED), show_alert=True)
+            return
+        await q.answer()
+        parts = q.data.split("|")
+        code, page = parts[2], int(parts[3])
+        _, data = await fsm.get(q.from_user.id)
+        await _render_torrent_page(q.message, code, data.get("cands", []), page,
+                                   data.get("title", ""))
+
+    @client.on_callback_query(filters.regex(r"^staff\|rtpick"))
+    async def _torrent_pick(_: Client, q: CallbackQuery) -> None:
+        if not _allowed(q, Permission.QUEUE_DOWNLOADS):
+            await q.answer(L(M.ACCESS_DENIED), show_alert=True)
+            return
+        await _torrent_queue(q, int(q.data.split("|")[3]))
+
+    @client.on_callback_query(filters.regex(r"^staff\|rtauto"))
+    async def _torrent_auto(_: Client, q: CallbackQuery) -> None:
+        if not _allowed(q, Permission.QUEUE_DOWNLOADS):
+            await q.answer(L(M.ACCESS_DENIED), show_alert=True)
+            return
+        await _torrent_queue(q, 0)  # candidates are already ranked best-first
 
     @client.on_callback_query(filters.regex(r"^staff\|rsiteprio"))
     async def _site_priority(_: Client, q: CallbackQuery) -> None:
