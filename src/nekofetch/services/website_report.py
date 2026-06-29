@@ -102,6 +102,15 @@ async def build_website_report(container: Container, *, title: str,
     """Fetch coverage from both website sources concurrently and analyse it."""
     expected = franchise.get("franchise_episodes")
     seasons = franchise.get("franchise_seasons")
+    # Older requests may have been stored before the episode fix, with no count.
+    # Re-derive it live so the report is accurate rather than showing "?".
+    if not expected and franchise.get("anilist_id"):
+        try:
+            totals = await container.anilist.franchise_totals(int(franchise["anilist_id"]))
+            expected = totals.episodes or expected
+            seasons = seasons or totals.seasons
+        except Exception:  # noqa: BLE001
+            pass
     report = WebsiteReport(title=title, anilist_episodes=expected, anilist_seasons=seasons,
                            tree=_ordered_tree(franchise))
     # Match on BOTH English and Romaji so the site result is provably the same show.

@@ -18,6 +18,7 @@ _COMMAND_KEYS = (
     ("help", M.CMD_HELP),
     ("cancel", M.CMD_CANCEL),
     ("reload", M.CMD_RELOAD),
+    ("cleardownloads", M.CMD_CLEARDOWNLOADS),
     ("resetoverrides", M.CMD_RESETOVERRIDES),
 )
 
@@ -95,6 +96,21 @@ def register(client: Client, container: Container) -> None:
             t(M.RELOAD_DONE, count=count, path=str(LANG_DIR / "en.json")),
             parse_mode=ParseMode.HTML,
         )
+
+    @client.on_message(filters.command("cleardownloads"))
+    async def _clear_downloads(_: Client, message: Message) -> None:
+        # Owner-only: wipe stale/active download state — cancels every
+        # queued/running/orphaned job and clears live progress so ACTIVE TASKS
+        # reflects reality. Use when a ghost download is stuck showing as active.
+        if not _is_owner(message):
+            await message.reply(t(M.OWNER_ONLY), parse_mode=ParseMode.HTML)
+            return
+        from nekofetch.services.queue_service import QueueService
+
+        n = await QueueService(container).cancel_all_active()
+        from nekofetch.services.log_channel_service import LogChannelService
+        await LogChannelService(container).refresh_active()
+        await message.reply(t(M.DOWNLOADS_CLEARED, count=n), parse_mode=ParseMode.HTML)
 
     @client.on_message(filters.command("resetoverrides"))
     async def _reset_overrides(_: Client, message: Message) -> None:

@@ -36,6 +36,14 @@ async def loading_animation(msg: Message, label: str, steps: int = 3, delay: flo
 
 
 SPINNER = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+SPINNER_DONE = "✓"  # settled frame so the loader never freezes mid-spin
+
+
+async def _safe_edit(msg: Message, text: str) -> None:
+    try:
+        await msg.edit_text(text, parse_mode=ParseMode.HTML)
+    except Exception:
+        pass
 
 
 async def animate_until(
@@ -43,25 +51,30 @@ async def animate_until(
     awaitable,
     render,
     *,
-    cadence: float = 0.55,
+    cadence: float = 0.12,
 ):
     """Keep ``msg`` visibly alive (cycling spinner) until ``awaitable`` resolves.
 
     ``render(frame)`` returns the HTML caption for a given spinner frame. The
     awaited result is returned. Telegram flood/edit errors are swallowed — the
     animation is cosmetic and must never break the actual operation.
+
+    The first frame is painted immediately (so even a sub-cadence operation shows
+    the loader), the spinner ticks quickly, and on completion a settled ``✓`` frame
+    is painted in a ``finally`` so the message never freezes on a random mid-cycle
+    glyph if the awaitable finishes early, errors, or is cancelled.
     """
     task = asyncio.ensure_future(awaitable)
     frame = 0
-    while not task.done():
-        await asyncio.sleep(cadence)
-        frame += 1
-        try:
-            await msg.edit_text(render(SPINNER[frame % len(SPINNER)]),
-                                parse_mode=ParseMode.HTML)
-        except Exception:
-            pass
-    return await task
+    await _safe_edit(msg, render(SPINNER[0]))   # paint immediately
+    try:
+        while not task.done():
+            await asyncio.sleep(cadence)
+            frame += 1
+            await _safe_edit(msg, render(SPINNER[frame % len(SPINNER)]))
+        return await task
+    finally:
+        await _safe_edit(msg, render(SPINNER_DONE))
 
 
 async def staged_loading(msg: Message, stages: list[str], delay_per_stage: float = 0.4) -> None:

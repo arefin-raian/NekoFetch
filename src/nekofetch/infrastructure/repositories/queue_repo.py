@@ -30,6 +30,13 @@ class QueueRepository(BaseRepository[DownloadJob]):
         )
         return list(result.scalars().all())
 
+    async def by_status(self, *statuses: JobStatus) -> list[DownloadJob]:
+        result = await self.session.execute(
+            select(DownloadJob).where(DownloadJob.status.in_(set(statuses)))
+            .order_by(DownloadJob.id.asc())
+        )
+        return list(result.scalars().all())
+
     async def count_by_status(self, status: JobStatus) -> int:
         result = await self.session.execute(
             select(func.count()).select_from(DownloadJob).where(DownloadJob.status == status)

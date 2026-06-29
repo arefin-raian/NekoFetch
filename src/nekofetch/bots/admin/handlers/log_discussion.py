@@ -33,4 +33,4 @@ def register(client: Client, container: Container) -> None:
             return
         from nekofetch.services.log_channel_service import LogChannelService
 
-        await LogChannelService(container).note_discussion(message.id)
+        await LogChannelService(container).note_discussion(message)

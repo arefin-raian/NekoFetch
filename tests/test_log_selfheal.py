@@ -21,6 +21,22 @@ def test_localizer_reload_picks_up_edits(tmp_path):
     assert loc.get("greeting") == "Hi there"  # propagates without a new instance
 
 
+def test_localizer_auto_reloads_on_disk_change(tmp_path):
+    import os
+    import time
+
+    f = tmp_path / "en.json"
+    f.write_text(json.dumps({"greeting": "Hello"}), encoding="utf-8")
+    loc = Localizer(tmp_path, default="en")
+    assert loc.get("greeting") == "Hello"
+    # Edit on disk and bump mtime unambiguously into the future.
+    f.write_text(json.dumps({"greeting": "Hi there"}), encoding="utf-8")
+    future = time.time() + 10
+    os.utime(f, (future, future))
+    loc._next_check = 0.0  # bypass the stat throttle for the test
+    assert loc.get("greeting") == "Hi there"  # auto-reloaded — no explicit reload()
+
+
 # ── log channel self-heal: fakes for client + redis ───────────────────────────
 
 class _FakeRedis:
@@ -43,6 +59,11 @@ class _Msg:
         self.empty = False
         self.kind = kind
         self.pinned_message = None
+        # Conversation-section fields the discussion handler reads off a human msg.
+        self.text = None
+        self.caption = None
+        self.author_signature = None
+        self.from_user = None
 
 
 class _FakeClient:
@@ -105,11 +126,13 @@ def test_build_layout_order_and_pins():
     svc, client, _ = _svc()
     asyncio.run(svc.ensure_sections())
     kinds = [k for k, _ in client.order]
-    # Layout: intro text, then a divider before each section, then a closing divider.
+    # Layout: intro text, then a divider before each section. No closing divider —
+    # the catalog + its reserved slots are the final messages so request cards
+    # append into clean space.
     assert kinds[0] == "text"          # the intro comes first (no cover configured)
     assert kinds[1] == "sticker"       # divider before the first section
-    assert kinds[-1] == "sticker"      # closing divider
-    assert kinds.count("sticker") == len(_SECTIONS) + 1  # per-section + closing
+    assert kinds[-1] == "text"         # ends on the catalog's reserved slots, not a sticker
+    assert kinds.count("sticker") == len(_SECTIONS)  # one divider per section, none trailing
     # Pinned sections (dashboard, catalog) actually got pinned.
     assert len(client.pinned) == sum(1 for s in _SECTIONS if s.pinned)
     # Text msgs = intro + one per section + reserved slots on growth sections.
@@ -128,19 +151,29 @@ def test_self_heal_after_wipe():
     # Restart: ensure_sections must detect the gap and rebuild everything in order.
     asyncio.run(svc.ensure_sections())
     kinds = [k for k, _ in client.order]
-    assert kinds.count("sticker") == len(_SECTIONS) + 1
+    assert kinds.count("sticker") == len(_SECTIONS)
     assert len(client.pinned) == sum(1 for s in _SECTIONS if s.pinned)
     assert set(client.live) != set(first_ids)  # genuinely new messages
 
 
-def test_discussion_thread_swept_after_ttl():
+def _human_msg(mid, text, name="Rai Yan"):
+    m = _Msg(mid)
+    m.text = text
+    m.author_signature = name
+    return m
+
+
+def test_discussion_reformats_and_sweeps_after_ttl():
     svc, client, redis = _svc()
     asyncio.run(svc.ensure_sections())
-    # Two human messages form a discussion thread.
-    asyncio.run(svc.note_discussion(5001))
-    asyncio.run(svc.note_discussion(5002))
+    # Two human text messages: each original is deleted and reposted as a signed
+    # line; the first opens the thread with a divider.
+    asyncio.run(svc.note_discussion(_human_msg(5001, "hi")))
+    asyncio.run(svc.note_discussion(_human_msg(5002, "yo")))
+    assert 5001 not in client.live and 5002 not in client.live  # originals removed
     thread = json.loads(redis.store["nf:logcc:discussion"])
-    assert {5001, 5002} <= set(thread["ids"])
+    assert thread["ids"]                       # reposted line (+divider) ids tracked
+    assert 5001 not in thread["ids"]           # raw ids are not what we track now
     # Fresh thread is NOT swept.
     asyncio.run(svc.sweep_discussions())
     assert "nf:logcc:discussion" in redis.store

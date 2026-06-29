@@ -21,7 +21,12 @@ async def _run() -> None:
 
     container = Container.create()
     await container.startup()
-    log.info("nekofetch.starting", version=_version())
+    # Log the EXACT running build (version + git commit + when it was committed) so
+    # you can confirm a restart actually picked up new code — the surest cure for
+    # "why is it still running the old code?" is seeing the live commit here.
+    build = _build_id()
+    log.info("nekofetch.starting", version=_version(), build=build)
+    print(f"\n  NekoFetch {_version()}  ·  build {build}\n", flush=True)
 
     # Bot manager is wired in the bots layer; imported lazily so core stays standalone.
     from nekofetch.bots.manager import BotManager
@@ -52,6 +57,23 @@ def _version() -> str:
     from nekofetch import __version__
 
     return __version__
+
+
+def _build_id() -> str:
+    """Short git commit + commit date of the running tree, for restart verification.
+    Falls back to 'unknown' outside a git checkout."""
+    import subprocess
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "log", "-1", "--format=%h %cd", "--date=format:%Y-%m-%d %H:%M"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:  # noqa: BLE001
+        return "unknown"
 
 
 def main() -> None:

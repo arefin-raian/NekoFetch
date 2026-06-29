@@ -13,7 +13,28 @@ import html
 
 from nekofetch.core.constants import RULE_HEAVY
 from nekofetch.localization.messages import M, t
-from nekofetch.ui.progress import bar, human_eta
+from nekofetch.ui.progress import bar, human_bytes, human_eta, human_speed
+
+# Stage label (first word, lowercased) → leading glyph. Anything unknown falls
+# back to the generic gear so a new pipeline stage still renders cleanly.
+_STAGE_ICON = {
+    "downloading": "⬇️", "download": "⬇️", "fetching": "⬇️", "queued": "📋",
+    "assembling": "🧬", "muxing": "🧬", "merging": "🧬",
+    "compressing": "🗜️", "transcoding": "🗜️", "transcode": "🗜️", "encoding": "🗜️",
+    "verifying": "🔍", "verify": "🔍", "probing": "🔍",
+    "rename": "✏️", "renaming": "✏️", "metadata": "🏷️", "tagging": "🏷️",
+    "branding": "🎨", "watermark": "💧", "watermarking": "💧",
+    "thumbnail": "🖼️", "thumbnailing": "🖼️", "subtitle": "💬", "subtitles": "💬",
+    "store": "💾", "storing": "💾", "uploading": "⬆️", "upload": "⬆️",
+    "processing": "⚙️", "running": "⚙️", "pending": "⏳",
+}
+
+# Audio track → short, scannable badge for the active row (what's being fetched).
+_AUDIO_LABEL = {
+    "subbed": "SUB", "sub": "SUB",
+    "dubbed": "DUB", "dub": "DUB",
+    "dual_audio": "DUAL", "dual": "DUAL",
+}
 
 # Human-friendly notice labels keyed by "category.action". Anything not listed
 # falls back to a title-cased version of the action.
@@ -85,15 +106,72 @@ def active_section(rows: list[dict], ts: str) -> str:
     return f"{_header(M.CC_ACTIVE_TITLE, ts)}\n\n{body}"
 
 
+def _stage_glyph(stage: str) -> str:
+    key = (stage or "").strip().lower().split()[0] if stage else ""
+    return _STAGE_ICON.get(key, "⚙️")
+
+
 def active_row(r: dict) -> str:
+    """One richly-detailed active task: title + episode line, a stage line with a
+    full-width bar and percent, and a stats line (speed · size · ETA). Every piece
+    is shown only when its data is present, so a probe-only stage stays tidy while
+    a live download shows the lot."""
     pct = int(r.get("progress", 0) or 0)
+    stage = str(r.get("stage") or "").strip()
+
+    # ── episode line ── "📺 S01E005 (5/220)"
+    ep_block = ""
+    episode = r.get("episode")
+    if episode:
+        season = int(r.get("season") or 1)
+        of = ""
+        idx, tot = r.get("ep_index"), r.get("ep_total")
+        if idx and tot:
+            of = t(M.CC_ACTIVE_EP_OF, index=idx, total=tot)
+        ep_block = t(
+            M.CC_ACTIVE_EP,
+            season=f"{season:02d}",
+            episode=f"{int(episode):03d}",
+            of=of,
+        )
+
+    # ── version line ── exactly what's being fetched: quality + SUB/DUB/DUAL
+    ver_bits = []
+    if r.get("resolution"):
+        ver_bits.append(str(r["resolution"]))
+    aud = _AUDIO_LABEL.get(str(r.get("audio") or "").lower())
+    if aud:
+        ver_bits.append(aud)
+    ver_block = t(M.CC_ACTIVE_VER, ver=_esc(" · ".join(ver_bits))) if ver_bits else ""
+
+    # ── stage line ── glyph + stage label, falls back to a neutral marker
+    stage_label = f"{_stage_glyph(stage)} {_esc(stage)}" if stage else "⚙️ <i>working</i>"
+
+    # ── stats line ── only the parts we actually know
+    parts: list[str] = []
+    speed = float(r.get("speed_bps") or 0)
+    if speed > 0:
+        parts.append(t(M.CC_ACTIVE_STAT_SPEED, speed=_esc(human_speed(speed))))
+    done, total = int(r.get("done") or 0), int(r.get("total") or 0)
+    if total > 0:
+        parts.append(t(M.CC_ACTIVE_STAT_SIZE,
+                       done=_esc(human_bytes(done)), total=_esc(human_bytes(total))))
+    elif done > 0:
+        parts.append(t(M.CC_ACTIVE_STAT_SIZE_NOTOTAL, done=_esc(human_bytes(done))))
+    eta = r.get("eta_seconds")
+    if eta is not None:
+        parts.append(t(M.CC_ACTIVE_STAT_ETA, eta=_esc(human_eta(eta))))
+    stats = t(M.CC_ACTIVE_STAT_SEP).join(parts) if parts else "<i>starting…</i>"
+
     return t(
         M.CC_ACTIVE_ROW,
         title=_esc(r.get("title", "—")),
-        stage=_esc(r.get("stage", "")),
-        bar=bar(pct, width=12).split(" ")[0],
+        ep=ep_block,
+        ver=ver_block,
+        stage=stage_label,
+        bar=bar(pct, width=16).split(" ")[0],
         pct=pct,
-        eta=_esc(human_eta(r.get("eta_seconds"))),
+        stats=stats,
     )
 
 
@@ -164,4 +242,36 @@ def ambiguity_card(code: str, title: str, question: str) -> str:
     return (
         t(M.CC_AMBIGUITY_TITLE, code=_esc(code)) + "\n\n"
         + t(M.CC_AMBIGUITY_BODY, title=_esc(title), question=_esc(question))
+    )
+
+
+def conversation_line(name: str, text: str) -> str:
+    """One human chat line in the conversation section: ``[<b>Name</b>]: text``.
+    Both fields are HTML-escaped — the poster's text is shown literally, never as
+    markup."""
+    return t(M.CC_CONVO_LINE, name=_esc(name), text=_esc(text))
+
+
+def failure_card(code: str, title: str, stage: str, error: str) -> str:
+    """A prominent standalone failure card for a failed download/processing job."""
+    return (
+        t(M.CC_FAILURE_TITLE, code=_esc(code)) + "\n\n"
+        + t(M.CC_FAILURE_BODY, title=_esc(title), stage=_esc(stage), error=_esc(error))
+    )
+
+
+def attention_card(code: str, title: str, failures: list) -> str:
+    """Card for episodes that couldn't be downloaded — the rest of the series
+    already shipped; these need a Retry / Switch-source / Provide-file decision.
+
+    ``failures`` is ``[{"ep": n, "audio": "subbed"|"dubbed"|...}]`` so each line
+    states WHICH version failed (e.g. "Ep 2 · SUB"), not just an episode number."""
+    parts = []
+    for f in failures:
+        badge = _AUDIO_LABEL.get(str(f.get("audio") or "").lower())
+        parts.append(f"Ep {f['ep']}" + (f" · {badge}" if badge else ""))
+    body = "  /  ".join(parts) or "—"
+    return (
+        t(M.CC_ATTENTION_TITLE, code=_esc(code)) + "\n\n"
+        + t(M.CC_ATTENTION_BODY, title=_esc(title), episodes=_esc(body))
     )

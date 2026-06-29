@@ -24,8 +24,22 @@ from nekofetch.infrastructure.database.postgres.session import session_scope
 from nekofetch.infrastructure.database.redis.progress import ProgressSnapshot
 from nekofetch.infrastructure.repositories.queue_repo import QueueRepository
 from nekofetch.infrastructure.repositories.request_repo import RequestRepository
+from nekofetch.sources._diagnostics import classify as _classify
 
 log = get_logger(__name__)
+
+
+class _SkipEpisode(Exception):
+    """Raised internally when an admin Stops the currently-downloading episode."""
+
+
+class _CancelJob(BaseException):
+    """Raised internally when an admin Cancels the entire job.
+
+    Deliberately a ``BaseException`` so the per-unit ``except Exception`` guards
+    (which isolate ordinary download failures) don't swallow it — a Cancel must
+    propagate all the way up to ``_process_job`` and tear the whole job down.
+    """
 
 
 class DownloadWorker:
@@ -37,6 +51,7 @@ class DownloadWorker:
 
     async def run_forever(self, poll_interval: float = 2.0) -> None:
         self._running = True
+        await self.recover_on_startup()
         log.info("download.worker.start", concurrency=self._c.config.downloads.concurrent_downloads)
         while self._running:
             job_id = await self._claim_next()
@@ -91,78 +106,382 @@ class DownloadWorker:
 
         audios = self._target_audios(req)
         folder = _safe_folder(req)
+        await self._clear_skip(job_id)
 
-        for ep in episodes:
-            variants = await source.get_variants(ep.source_ref)
-            avail_resolutions = sorted(
-                set(v.resolution for v in variants),
-                key=lambda r: int(r.rstrip("p")), reverse=True,
-            )
-            if req.resolution:
-                avail_resolutions = [r for r in avail_resolutions if r == req.resolution]
-            for resolution in avail_resolutions:
-                has_native_dual = any(
-                    v.audio == AudioType.DUAL_AUDIO and v.resolution == resolution
-                    for v in variants
+        # First pass: download every (episode, resolution, audio) unit. A unit that
+        # fails — or is Stopped mid-flight from ACTIVE TASKS — is recorded and
+        # retried after the rest, so ONE bad episode never blocks the whole series.
+        # A whole-job Cancel aborts the lot and tears the job down cleanly.
+        try:
+            failed: list[dict] = []
+            for ep in episodes:
+                if await self._cancel_requested(job_id):
+                    raise _CancelJob()
+                await self._download_episode(
+                    job_id, req, source, chain, ep, audios, folder, cfg, failed
                 )
-                for audio in audios:
-                    # Dual requested but no single native dual track — build the
-                    # best result across the source chain (merge / separate /
-                    # cross-source / sub-only) so both languages are delivered.
-                    if audio == AudioType.DUAL_AUDIO and not has_native_dual:
-                        await self._acquire_dual(chain, req, ep, resolution, folder,
-                                                 job_id, cfg)
+
+            # Retry pass: re-extract FRESH variants (new tokens / rotated hosts),
+            # which recovers expired-token and dead-host failures with no manual action.
+            remaining: list[dict] = []
+            for spec in failed:
+                if await self._cancel_requested(job_id):
+                    raise _CancelJob()
+                if not await self._retry_unit(job_id, req, source, chain, spec, folder, cfg):
+                    remaining.append(spec)
+        except _CancelJob:
+            await self._finalize_cancelled(job_id)
+            return
+
+        # The series is NOT blocked: whatever downloaded proceeds to processing, and
+        # any still-stuck episodes are recorded so the control center can offer
+        # Retry / Switch-source / Provide-file instead of auto-retrying forever.
+        if remaining:
+            await self._mark_partial(job_id, remaining)
+        await self._complete(job_id)
+
+    async def _download_episode(self, job_id, req, source, chain, ep, audios, folder,
+                                cfg, failed: list) -> None:
+        """Download every resolution/audio unit for ONE episode, recording (never
+        raising) failures so the caller keeps going through the rest of the series."""
+        try:
+            variants = await source.get_variants(ep.source_ref)
+        except Exception as exc:  # noqa: BLE001
+            kind, reason = _classify(exc)
+            log.warning("download.variants.failed", season=ep.season, episode=ep.number,
+                        failure=kind.value, reason=reason)
+            failed.append(self._spec(ep, None, None, dual=False))
+            return
+        available = {v.resolution for v in variants}
+        for resolution in self._resolutions_to_fetch(req, available):
+            has_native_dual = any(
+                v.audio == AudioType.DUAL_AUDIO and v.resolution == resolution for v in variants
+            )
+            for audio in audios:
+                dual = audio == AudioType.DUAL_AUDIO and not has_native_dual
+                spec = self._spec(ep, resolution, audio, dual=dual)
+                try:
+                    if dual:
+                        await self._acquire_dual(chain, req, ep, resolution, folder, job_id, cfg)
                         continue
                     variant = _select_variant(
-                        variants, resolution, audio, self._c.config.acquisition.require_english_subs
+                        variants, resolution, audio,
+                        self._c.config.acquisition.require_english_subs,
                     )
                     if variant is None:
                         continue
+                    # Resume: if a prior run already downloaded this exact unit and
+                    # the file is still on disk, skip it (e.g. eps 1-9 done → ep 10).
+                    if await self._already_have(job_id, ep, resolution, audio):
+                        continue
+                    if not await self._run_unit(job_id, req, source, ep, variant, folder, cfg):
+                        failed.append(spec)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    kind, reason = _classify(exc)
+                    log.warning("download.unit.failed", season=ep.season, episode=ep.number,
+                                resolution=resolution, audio=audio.value,
+                                failure=kind.value, reason=reason)
+                    failed.append(spec)
 
-                    dest = (
-                        self._c.env.storage_path
-                        / "work"
-                        / folder
-                        / f"S{ep.season:02d}E{ep.number:03d}_{variant.resolution}_{variant.audio.value}"
-                        f".{variant.container or 'mkv'}"
+    @staticmethod
+    def _spec(ep, resolution, audio, *, dual: bool) -> dict:
+        return {"ep_ref": ep.source_ref, "season": ep.season, "number": ep.number,
+                "title": ep.title, "resolution": resolution,
+                "audio": audio.value if audio is not None else None, "dual": dual}
+
+    async def _run_unit(self, job_id, req, source, ep, variant, folder, cfg) -> bool:
+        """Download a single variant under a Stop watcher. True on success; False if
+        it failed or was Stopped (so it lands on the retry list)."""
+        dest = (
+            self._c.env.storage_path / "work" / folder
+            / f"S{ep.season:02d}E{ep.number:03d}_{variant.resolution}_{variant.audio.value}"
+              f".{variant.container or 'mkv'}"
+        )
+        on_progress = self._make_progress(job_id, ep, variant, cfg)
+        try:
+            result = await self._download_watched(job_id, source, variant, dest, on_progress, cfg)
+        except _SkipEpisode:
+            log.info("download.episode.stopped", season=ep.season, episode=ep.number)
+            return False
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            kind, reason = _classify(exc)
+            log.warning("download.unit.error", season=ep.season, episode=ep.number,
+                        failure=kind.value, reason=reason)
+            return False
+        await self._record_file(job_id, req, ep, variant, dest, result)
+        return True
+
+    async def _download_watched(self, job_id, source, variant, dest, on_progress, cfg) -> dict:
+        """Run the (retrying) download as a sub-task while polling the Stop flag, so
+        an admin can stop the CURRENT episode without killing the whole job."""
+        task = asyncio.ensure_future(self._download_with_retry(
+            source, variant, dest, on_progress, cfg.retry_attempts, cfg.retry_backoff_seconds,
+        ))
+        while True:
+            cancel = await self._cancel_requested(job_id)
+            if cancel or await self._skip_requested(job_id):
+                task.cancel()
+                if not cancel:
+                    await self._clear_skip(job_id)
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001 - swallow whatever the cancel surfaces
+                    pass
+                raise _CancelJob() if cancel else _SkipEpisode()
+            try:
+                return await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+
+    def _make_progress(self, job_id, ep, variant, cfg):
+        """Build the rolling-window progress callback for one unit."""
+        st = {"last": 0.0, "win_t": time.monotonic(), "win_done": 0}
+
+        async def on_progress(done: int, total: int) -> None:
+            now = time.monotonic()
+            if now - st["last"] < cfg.progress_update_interval_seconds:
+                return
+            dt = max(now - st["win_t"], 1e-6)
+            speed = max(done - st["win_done"], 0) / dt
+            st["win_t"], st["win_done"], st["last"] = now, done, now
+            pct = (done / total * 100) if total else 0.0
+            eta = int((total - done) / speed) if speed > 0 else None
+            if self._c.progress:
+                try:
+                    await self._c.progress.set(ProgressSnapshot(
+                        job_id=job_id, status=JobStatus.RUNNING.value, progress=pct,
+                        speed_bps=speed, downloaded_bytes=done, total_bytes=total,
+                        current_episode=ep.number, eta_seconds=eta,
+                        resolution=variant.resolution, audio=variant.audio.value,
+                        label=f"S{ep.season:02d}E{ep.number:03d} {variant.resolution} {variant.audio.value}",
+                    ))
+                except Exception:  # noqa: BLE001
+                    # Progress is cosmetic telemetry — a Redis hiccup (e.g. an
+                    # Upstash read timeout) must NEVER fail an episode that is
+                    # actually downloading fine.
+                    pass
+        return on_progress
+
+    async def _retry_unit(self, job_id, req, source, chain, spec, folder, cfg) -> bool:
+        """Retry one failed unit ONCE with freshly re-extracted metadata."""
+        from nekofetch.sources.base import Episode
+
+        ep = Episode(source_ref=spec["ep_ref"], season=spec["season"],
+                     number=spec["number"], title=spec.get("title"))
+        try:
+            if spec.get("dual"):
+                await self._acquire_dual(chain, req, ep, spec["resolution"], folder, job_id, cfg)
+                return True
+            if not spec.get("resolution") or not spec.get("audio"):
+                return False
+            variants = await source.get_variants(spec["ep_ref"])  # fresh tokens/hosts
+            variant = _select_variant(
+                variants, spec["resolution"], AudioType(spec["audio"]),
+                self._c.config.acquisition.require_english_subs,
+            )
+            if variant is None:
+                return False
+            return await self._run_unit(job_id, req, source, ep, variant, folder, cfg)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            kind, reason = _classify(exc)
+            log.warning("download.retry.failed", season=spec["season"], episode=spec["number"],
+                        failure=kind.value, reason=reason)
+            return False
+
+    async def _mark_partial(self, job_id: int, remaining: list) -> None:
+        """Record the episodes that couldn't be downloaded and post an actionable
+        attention card (Retry / Switch-source / Provide-file). The job still
+        completes — the series ships with what succeeded."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            job = await session.get(DownloadJob, job_id)
+            req = await RequestRepository(session).get(job.request_id) if job else None
+            if job is not None:
+                state = dict(job.resume_state or {})
+                state["partial_failures"] = remaining
+                job.resume_state = state
+            code = req.code if req else ""
+            title = req.anime_title if req else ""
+            source = req.source if req else ""
+        # Keep per-episode audio so the card says exactly WHICH version failed
+        # (sub vs dub), not just an episode number.
+        seen: set = set()
+        failures: list[dict] = []
+        for s in remaining:
+            n = s.get("number")
+            if n is None or (n, s.get("audio")) in seen:
+                continue
+            seen.add((n, s.get("audio")))
+            failures.append({"ep": n, "audio": s.get("audio")})
+        log.warning("download.job.partial", job_id=job_id,
+                    stuck=[(f["ep"], f["audio"]) for f in failures], source=source)
+        from nekofetch.services.log_channel_service import LogChannelService
+        await LogChannelService(self._c).post_attention_card(
+            code=code, title=title, failures=failures, source=source,
+            alt_source=_alternate_source(source),
+        )
+
+    async def ingest_provided_file(self, code: str, episode: int, src_path) -> None:
+        """Ingest an admin-provided file for a stuck episode: record it as a verified
+        MediaFile, push it to the storage channel, then remove the local temp so we
+        don't keep the hand-delivered copy around."""
+        from pathlib import Path
+
+        from sqlalchemy import select
+
+        from nekofetch.core.exceptions import NotFound
+        from nekofetch.infrastructure.database.postgres.models import DownloadJob
+
+        src_path = Path(src_path)
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            job = (await session.execute(
+                select(DownloadJob).where(DownloadJob.request_id == req.id)
+                .order_by(DownloadJob.id.desc())
+            )).scalars().first()
+            job_id = job.id if job else None
+            anime_doc_id = req.anime_doc_id or req.source_ref
+            audio = req.audio or AudioType.SUBBED
+            season = req.season or 1
+            folder = _safe_folder(req)
+        ext = src_path.suffix.lstrip(".") or "mkv"
+        dest = (self._c.env.storage_path / "work" / folder
+                / f"S{season:02d}E{int(episode):03d}_manual.{ext}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if src_path.resolve() != dest.resolve():
+            src_path.replace(dest)
+        import hashlib
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            session.add(MediaFile(
+                job_id=job_id, anime_doc_id=anime_doc_id, season=season,
+                episode=int(episode), resolution="source", audio=audio,
+                local_path=str(dest), size_bytes=dest.stat().st_size,
+                checksum=hashlib.sha256(dest.read_bytes()).hexdigest(),
+                container=ext, verified=True,
+            ))
+        from nekofetch.services.publishing_service import PublishingService
+        await PublishingService(self._c).upload_to_storage(code)
+        try:
+            dest.unlink()                 # delete the provided file after ingesting it
+        except OSError:
+            pass
+        log.info("download.manual.ingested", code=code, episode=episode)
+
+    # ── Stop-current-episode flag (set from ACTIVE TASKS) ────────────────────────
+    @staticmethod
+    def _skip_key(job_id: int) -> str:
+        return f"nf:job:{job_id}:skip"
+
+    async def _skip_requested(self, job_id: int) -> bool:
+        if not self._c.redis:
+            return False
+        try:
+            return bool(await self._c.redis.get(self._skip_key(job_id)))
+        except Exception:  # noqa: BLE001 - a Redis blip must not fail the download
+            return False
+
+    async def _clear_skip(self, job_id: int) -> None:
+        if self._c.redis:
+            await self._c.redis.delete(self._skip_key(job_id))
+
+    async def request_skip(self, job_id: int) -> None:
+        """Public: signal the worker to Stop the currently-downloading episode (it
+        finishes the rest of the series, then retries this one at the end)."""
+        if self._c.redis:
+            await self._c.redis.set(self._skip_key(job_id), "1", ex=300)
+
+    # ── Cancel-whole-job flag ────────────────────────────────────────────────────
+    @staticmethod
+    def _cancel_key(job_id: int) -> str:
+        return f"nf:job:{job_id}:cancel"
+
+    async def _cancel_requested(self, job_id: int) -> bool:
+        if not self._c.redis:
+            return False
+        try:
+            return bool(await self._c.redis.get(self._cancel_key(job_id)))
+        except Exception:  # noqa: BLE001 - a Redis blip must not fail the download
+            return False
+
+    async def _clear_cancel(self, job_id: int) -> None:
+        if self._c.redis:
+            await self._c.redis.delete(self._cancel_key(job_id))
+
+    async def _finalize_cancelled(self, job_id: int) -> None:
+        """Tear a cancelled job down cleanly: mark it CANCELLED (so it leaves the
+        active list), drop its live progress, and clear its control flags."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            job = await session.get(DownloadJob, job_id)
+            title = code = ""
+            if job is not None:
+                job.status = JobStatus.CANCELLED
+                job.finished_at = _now()
+                req = await RequestRepository(session).get(job.request_id)
+                if req is not None:
+                    req.status = RequestStatus.FAILED
+                    title, code = req.anime_title, req.code
+        if self._c.progress:
+            await self._c.progress.delete(job_id)
+        await self._clear_skip(job_id)
+        await self._clear_cancel(job_id)
+        log.info("download.job.cancelled", job_id=job_id)
+        from nekofetch.services.log_channel_service import LogChannelService
+        await LogChannelService(self._c).event("error", "cancelled", job=job_id,
+                                                anime=title, code=code)
+
+    # ── startup recovery / resume ────────────────────────────────────────────────
+    async def recover_on_startup(self) -> None:
+        """At process start NOTHING is downloading yet, so any job left RUNNING/PAUSED
+        was orphaned by a crash or kill. Re-queue it so the worker resumes (the loop
+        skips already-downloaded episodes), and clear its stale live-progress so
+        ACTIVE TASKS reflects reality instead of a phantom 'downloading' row.
+
+        When resume is disabled, orphans are failed outright rather than left hanging.
+        """
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            repo = QueueRepository(session)
+            orphaned = await repo.by_status(JobStatus.RUNNING, JobStatus.PAUSED)
+            ids = [j.id for j in orphaned]
+            resume = self._c.config.downloads.resume_interrupted
+            for job in orphaned:
+                if resume:
+                    job.status = JobStatus.QUEUED          # picked up + resumed
+                else:
+                    job.status = JobStatus.FAILED
+                    job.error = "interrupted (worker restarted)"
+        for jid in ids:
+            if self._c.progress:
+                await self._c.progress.delete(jid)
+            await self._clear_skip(jid)
+            await self._clear_cancel(jid)
+        if ids:
+            log.info("download.recover", orphaned=ids, resume=resume)
+
+    async def _already_have(self, job_id, ep, resolution, audio) -> bool:
+        """True if this exact unit was already downloaded in a prior run and the file
+        still exists — the basis of resume (eps 1-9 done → skip straight to ep 10)."""
+        from pathlib import Path
+
+        from sqlalchemy import select
+        try:
+            async with session_scope(self._c.pg_sessionmaker) as session:
+                row = (await session.execute(
+                    select(MediaFile).where(
+                        MediaFile.job_id == job_id, MediaFile.season == ep.season,
+                        MediaFile.episode == ep.number, MediaFile.resolution == resolution,
+                        MediaFile.audio == audio,
                     )
-
-                    start = time.monotonic()
-                    last_emit = 0.0
-
-                    async def on_progress(done: int, total: int, _ep=ep, _start=start,
-                                          _v=variant) -> None:
-                        nonlocal last_emit
-                        now = time.monotonic()
-                        if now - last_emit < cfg.progress_update_interval_seconds:
-                            return
-                        last_emit = now
-                        elapsed = max(now - _start, 1e-6)
-                        speed = done / elapsed
-                        pct = (done / total * 100) if total else 0.0
-                        eta = int((total - done) / speed) if speed > 0 else None
-                        if self._c.progress:
-                            await self._c.progress.set(
-                                ProgressSnapshot(
-                                    job_id=job_id,
-                                    status=JobStatus.RUNNING.value,
-                                    progress=pct,
-                                    speed_bps=speed,
-                                    downloaded_bytes=done,
-                                    total_bytes=total,
-                                    current_episode=_ep.number,
-                                    eta_seconds=eta,
-                                    label=f"S{_ep.season:02d}E{_ep.number:03d} {_v.resolution} {_v.audio.value}",
-                                )
-                            )
-
-                    result = await self._download_with_retry(
-                        source, variant, dest, on_progress,
-                        cfg.retry_attempts, cfg.retry_backoff_seconds,
-                    )
-                    await self._record_file(job_id, req, ep, variant, dest, result)
-
-        await self._complete(job_id)
+                )).scalars().first()
+            return bool(row and row.local_path and Path(row.local_path).exists())
+        except Exception:  # noqa: BLE001 - on error, just re-download (safe) not fail
+            return False
 
     async def _resolve_chain(self, req) -> list[tuple]:
         """Resolve a request to a priority-ordered chain of ``(source, episodes)``.
@@ -323,6 +642,28 @@ class DownloadWorker:
             return [req.audio]
         return [a for a in (_audio_for_language(lang) for lang in acq.languages) if a]
 
+    def _resolutions_to_fetch(self, req, available: set[str]) -> list[str]:
+        """Which resolutions to actually download for this episode.
+
+        A request that pins a resolution gets exactly that (if the source has it).
+        Otherwise we grab every mandatory target (1080p/720p/480p) the source
+        offers, and for any missing target we take the first available alternate
+        from its fallback ladder — so 480p degrades to 540p or 360p instead of
+        being skipped. Order/dupes are preserved/removed so each tier is fetched once.
+        """
+        if req.resolution:
+            return [req.resolution] if req.resolution in available else []
+        acq = self._c.config.acquisition
+        wanted: list[str] = []
+        for target in acq.target_resolutions:
+            pick = target if target in available else next(
+                (fb for fb in acq.resolution_fallbacks.get(target, []) if fb in available),
+                None,
+            )
+            if pick and pick not in wanted:
+                wanted.append(pick)
+        return wanted
+
     async def _download_with_retry(
         self, source, variant, dest, on_progress, attempts, backoff
     ) -> dict:
@@ -393,7 +734,7 @@ class DownloadWorker:
             # Log each stage as it runs
             ctx = await pipeline.run_for_job(job_id)
             await LogChannelService(self._c).event(
-                "processing", "complete", job=job_id, notes=len(ctx.notes),
+                "processing", "complete", job=job_id, anime=title, notes=len(ctx.notes),
                 stages=",".join(ctx.notes) if ctx.notes else None,
             )
             # Auto-upload the verified packs to the storage (database) channel — this
@@ -406,7 +747,9 @@ class DownloadWorker:
                 await NotificationService(self._c).processing_complete(user_id, title, code, needs_approval=needs_approval)
         except Exception as exc:
             log.error("download.processing.failed", job_id=job_id, error=str(exc))
-            await LogChannelService(self._c).event("error", "processing_failed", job=job_id, error=str(exc))
+            logcc = LogChannelService(self._c)
+            await logcc.event("error", "processing_failed", job=job_id, error=str(exc))
+            await logcc.post_failure_card(code=code, title=title, stage="processing", error=str(exc))
             if user_id:
                 from nekofetch.services.notification_service import NotificationService
                 await NotificationService(self._c).processing_failed(user_id, title, code, str(exc))
@@ -428,10 +771,26 @@ class DownloadWorker:
             await NotificationService(self._c).download_failed(user_id, title, code, str(exc))
         from nekofetch.services.log_channel_service import LogChannelService
 
-        await LogChannelService(self._c).event(
+        logcc = LogChannelService(self._c)
+        await logcc.event(
             "error", "download_failed", job=job_id, error=str(exc),
             anime=title, code=code,
         )
+        await logcc.post_failure_card(code=code, title=title, stage="download", error=str(exc))
+
+
+_WEBSITE_SOURCES = ("anikoto", "kickassanime")
+
+
+def _alternate_source(source: str) -> str | None:
+    """The other website source to offer as a switch target, or None when the
+    request isn't on a website source (torrent/telegram have no peer)."""
+    s = (source or "").lower()
+    present = [w for w in _WEBSITE_SOURCES if w in s]
+    if not present:
+        return None
+    primary = present[0]  # first token in a "a>b" chain is the current primary
+    return next((w for w in _WEBSITE_SOURCES if w != primary), None)
 
 
 def _safe_folder(req) -> str:

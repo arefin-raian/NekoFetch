@@ -52,9 +52,9 @@ class ProcessingPipeline:
                 )
                 try:
                     await stage.process(ctx)
-                    await LogChannelService(self._c).event(
-                        "processing", f"{stage.stage.value}_done", job=job_id,
-                    )
+                    # No per-stage "…done" event — the stage-start line is enough.
+                    # Doubling every step with a "done" (carrying only a bare job id)
+                    # just clutters the activity stream.
                 except Exception as exc:  # noqa: BLE001
                     job.status = JobStatus.FAILED
                     await LogChannelService(self._c).event(

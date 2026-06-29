@@ -20,8 +20,14 @@ def _esc(x: object) -> str:
 
 def render_report(report: WebsiteReport) -> str:
     rows = [t(M.WEB_REPORT_TITLE, title=_esc(report.title)), f"<i>{RULE}</i>"]
-    rows.append(t(M.WEB_REPORT_EXPECTS,
-                  eps=report.anilist_episodes or "?", seasons=report.anilist_seasons or "?"))
+    # Episodes are what matter; the season concept only makes sense for multi-season
+    # TV. For an ONA/OVA/movie or a single cour we drop the "seasons" half entirely
+    # rather than printing a meaningless "1 season" or "? seasons".
+    eps = report.anilist_episodes or "?"
+    if (report.anilist_seasons or 0) > 1:
+        rows.append(t(M.WEB_REPORT_EXPECTS, eps=eps, seasons=report.anilist_seasons))
+    else:
+        rows.append(t(M.WEB_REPORT_EXPECTS_EPS, eps=eps))
 
     # ── download tree (release order), capped + expandable ──
     tree = report.tree[:12]

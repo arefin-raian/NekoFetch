@@ -166,11 +166,15 @@ class PublishingService:
         for f in files:
             groups.setdefault((f["season"], f["resolution"], f["audio"]), []).append(f)
 
+        from nekofetch.services.processing.stages import POSTER_THUMB_NAME
+
         for (season, resolution, audio), items in groups.items():
             if not resolution or audio is None:
                 continue
             items.sort(key=lambda x: (x["episode"] or 0))
             episodes = [i["episode"] for i in items if i["episode"] is not None]
+            # The poster the thumbnail stage wrote sits beside the media files.
+            poster = Path(items[0]["path"]).with_name(POSTER_THUMB_NAME)
             try:
                 await storage.upload_pack(
                     storage.key_from(anime_doc_id, season, resolution, audio),
@@ -178,6 +182,7 @@ class PublishingService:
                     file_paths=[Path(i["path"]) for i in items],
                     episode_from=min(episodes) if episodes else None,
                     episode_to=max(episodes) if episodes else None,
+                    thumb=poster if poster.exists() else None,
                 )
             except FeatureDisabled:
                 return

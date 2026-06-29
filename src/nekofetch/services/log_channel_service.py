@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -41,6 +40,9 @@ _K_NOTICES = "nf:logcc:notices"
 _K_STICKERS = "nf:logcc:stickers"      # ordered list of layout message ids (cover/intro/dividers)
 _K_LAST_BOT = "nf:logcc:last_bot"      # set when the last channel post was bot-managed
 _K_DISCUSSION = "nf:logcc:discussion"  # {ids: [...], last: epoch} — temp human thread
+_K_REQ_MARKERS = "nf:logcc:reqmarkers"  # {code: {divider, card}} — per-request card+divider ids
+_K_SIGNED = "nf:logcc:signed"          # set once the channel's "Sign Messages" is enabled
+_K_STUCK = "nf:stuck:{code}"           # per-request stuck-episode state for the attention card
 
 
 def _sec_key(name: str) -> str:
@@ -93,7 +95,8 @@ class LogChannelService:
 
     @staticmethod
     def _ts() -> str:
-        return datetime.now(UTC).strftime("%H:%M:%S UTC")
+        from nekofetch.core.timefmt import now_label
+        return now_label()
 
     # ── low-level message helpers ───────────────────────────────────────────────
     async def _send(self, text: str, **kw):
@@ -101,10 +104,10 @@ class LogChannelService:
             self.cfg.channel_id, text, parse_mode=ParseMode.HTML, **kw
         )
 
-    async def _edit(self, mid: int, text: str) -> None:
+    async def _edit(self, mid: int, text: str, reply_markup=None) -> None:
         await self._client.edit_message_text(
             self.cfg.channel_id, mid, _truncate_html(text, MESSAGE_LIMIT),
-            parse_mode=ParseMode.HTML,
+            parse_mode=ParseMode.HTML, reply_markup=reply_markup,
         )
 
     async def _section_id(self, name: str) -> int | None:
@@ -119,18 +122,18 @@ class LogChannelService:
             return False
         return bool(msg) and not getattr(msg, "empty", False)
 
-    async def _edit_or_resend(self, name: str, text: str) -> None:
+    async def _edit_or_resend(self, name: str, text: str, reply_markup=None) -> None:
         """Edit a section in place; if its message is gone, resend and re-store."""
         mid = await self._section_id(name)
         if mid is not None:
             try:
-                await self._edit(mid, text)
+                await self._edit(mid, text, reply_markup=reply_markup)
                 return
             except Exception as exc:
                 if "MESSAGE_NOT_MODIFIED" in str(exc):
                     return
                 log.debug("logcc.edit.failed", section=name, error=str(exc))
-        msg = await self._send(text)
+        msg = await self._send(text, reply_markup=reply_markup)
         await self._c.redis.set(_sec_key(name), msg.id)
 
     # ── startup / self-healing ──────────────────────────────────────────────────
@@ -200,10 +203,12 @@ class LogChannelService:
         1. a cover image (if configured),
         2. a formatted introduction explaining the channel,
         3. a divider, then each control section (reserved slots on growth-prone
-           ones), every section preceded by a divider,
-        4. a closing divider.
+           ones), every section preceded by a divider.
 
-        Every non-section message id is tracked so a later wipe removes it too.
+        The catalog (last section) and its reserved slots are the final layout
+        messages — no trailing divider — so freshly posted request cards append
+        into clean space. Every non-section message id is tracked so a later wipe
+        removes it too.
         """
         extras: list[int] = []  # cover/intro, dividers — everything but sections
 
@@ -238,10 +243,6 @@ class LogChannelService:
                     r = await self._send(S.reserved_placeholder(i))
                     reserved.append(r.id)
                 await self._c.redis.set(_reserved_key(sec.name), json.dumps(reserved))
-
-        end = await self._post_divider()  # closing divider
-        if end:
-            extras.append(end)
 
         await self._c.redis.set(_K_STICKERS, json.dumps(extras))
         await self._c.redis.set(_K_CHANNEL, self.cfg.channel_id)
@@ -291,10 +292,12 @@ class LogChannelService:
         if not self._sectioned():
             return
         ts = self._ts()
+        # NOTE: 'active' is intentionally absent — it's owned by refresh_active()
+        # (the fast lane), which also attaches the per-job Stop keyboard. Editing it
+        # here without that markup would strip the buttons every full refresh.
         for name, builder in (
             ("dashboard", self._build_dashboard),
             ("pending", self._build_pending),
-            ("active", self._build_active),
             ("completed", self._build_completed),
             ("catalog", self._build_catalog),
         ):
@@ -302,8 +305,53 @@ class LogChannelService:
                 await self._edit_or_resend(name, await builder(ts))
             except Exception as exc:
                 log.debug("logcc.refresh.section.failed", section=name, error=str(exc))
+        # Keep the active panel + its Stop controls fresh on the full tick too.
+        await self.refresh_active()
         # Tidy idle human discussion as part of the periodic tick.
         await self.sweep_discussions()
+
+    async def refresh_active(self) -> None:
+        """Fast-lane refresh of just the active-tasks panel.
+
+        Re-renders only the live downloads/processing section so the progress bar
+        tracks reality within seconds, without paying for a full rebuild of the
+        dashboard/catalog/completed panels each tick. Identical content is a no-op
+        (Telegram MESSAGE_NOT_MODIFIED is swallowed)."""
+        if not self._sectioned():
+            return
+        try:
+            from nekofetch.services.queue_service import QueueService
+
+            qrows = await QueueService(self._c).dashboard(limit=8)
+            text = S.active_section([self._active_row_dict(r) for r in qrows], self._ts())
+            await self._edit_or_resend("active", text, reply_markup=self._active_keyboard(qrows))
+        except Exception as exc:
+            log.debug("logcc.refresh_active.failed", error=str(exc))
+
+    @staticmethod
+    def _active_row_dict(r) -> dict:
+        return {
+            "title": r.anime_title, "stage": r.stage or r.status, "progress": r.progress,
+            "speed_bps": r.speed_bps, "eta_seconds": r.eta_seconds, "episode": r.current_episode,
+            "season": r.season, "ep_index": r.episode_index, "ep_total": r.total_episodes,
+            "done": r.downloaded_bytes, "total": r.total_bytes, "label": r.label,
+            "resolution": r.resolution, "audio": r.audio,
+        }
+
+    def _active_keyboard(self, qrows):
+        """Per in-flight job: a Stop button (skip just the current episode) and a
+        Cancel button (terminate the whole series and remove it from the list)."""
+        rows = []
+        for r in qrows:
+            running = str(getattr(r, "status", "")).lower() == "running" or (r.progress or 0) < 100
+            if running:
+                rows.append([
+                    InlineKeyboardButton(t(M.CC_BTN_STOP_EP, ep=r.current_episode or "?"),
+                                         callback_data=cb("staff", "jstop", r.job_id)),
+                    InlineKeyboardButton(t(M.CC_BTN_CANCEL_JOB),
+                                         callback_data=cb("staff", "jcancel", r.job_id)),
+                ])
+        return InlineKeyboardMarkup(rows) if rows else None
 
     async def _build_dashboard(self, ts: str) -> str:
         from nekofetch.services.analytics_service import AnalyticsService
@@ -323,8 +371,22 @@ class LogChannelService:
 
         qrows = await QueueService(self._c).dashboard(limit=8)
         rows = [
-            {"title": r.anime_title, "stage": r.status, "progress": r.progress,
-             "eta_seconds": r.eta_seconds}
+            {
+                "title": r.anime_title,
+                "stage": r.stage or r.status,
+                "progress": r.progress,
+                "speed_bps": r.speed_bps,
+                "eta_seconds": r.eta_seconds,
+                "episode": r.current_episode,
+                "season": r.season,
+                "ep_index": r.episode_index,
+                "ep_total": r.total_episodes,
+                "done": r.downloaded_bytes,
+                "total": r.total_bytes,
+                "label": r.label,
+                "resolution": r.resolution,
+                "audio": r.audio,
+            }
             for r in qrows
         ]
         return S.active_section(rows, ts)
@@ -387,29 +449,171 @@ class LogChannelService:
             [_btn(M.ADMIN_BTN_REJECT, "staff", "rreject", code)],
         ])
         try:
-            await self._send(S.request_card(code, title, by, scope), reply_markup=kb)
-            await self._post_divider()  # separate each request card from the next
+            # Divider FIRST, then the card: Border → Card → Border → Card. The pair
+            # is tracked so that when the card is consumed (source assigned/rejected)
+            # both it and its divider are removed together — no orphan stickers.
+            divider_id = await self._post_divider()
+            card = await self._send(S.request_card(code, title, by, scope), reply_markup=kb)
+            await self._remember_request_markers(code, divider_id, card.id)
             await self._c.redis.set(_K_LAST_BOT, "1")  # next human msg gets a divider
         except Exception as exc:
             log.warning("logcc.request_card.failed", error=str(exc))
 
+    async def _remember_request_markers(
+        self, code: str, divider_id: int | None, card_id: int
+    ) -> None:
+        if not self._c.redis:
+            return
+        raw = await self._c.redis.get(_K_REQ_MARKERS)
+        markers = json.loads(raw) if raw else {}
+        markers[code] = {"divider": divider_id, "card": card_id}
+        await self._c.redis.set(_K_REQ_MARKERS, json.dumps(markers))
+
+    async def clear_request_markers(self, code: str, *, delete_divider: bool = True) -> None:
+        """Stop tracking a request card once it's consumed.
+
+        The card message itself is removed by the screen that replaces it, so we
+        only ever need to deal with the divider here:
+
+        * source assigned (``delete_divider=False``) — keep the divider. It becomes
+          the section separator that sits in front of the follow-up fetched card,
+          so the layout stays ``Border → Card → Border → Card`` without the fetched
+          card ever appearing naked.
+        * rejected (``delete_divider=True``) — the request is gone entirely, so its
+          divider goes with it, leaving no orphan sticker.
+        """
+        if not (self._active() and self._c.redis):
+            return
+        raw = await self._c.redis.get(_K_REQ_MARKERS)
+        markers = json.loads(raw) if raw else {}
+        entry = markers.pop(code, None)
+        if entry is None:
+            return
+        if delete_divider and entry.get("divider"):
+            try:
+                await self._client.delete_messages(self.cfg.channel_id, entry["divider"])
+            except Exception:
+                pass
+        await self._c.redis.set(_K_REQ_MARKERS, json.dumps(markers))
+
+    async def post_attention_card(
+        self, *, code: str, title: str, failures: list, source: str,
+        alt_source: str | None,
+    ) -> None:
+        """Post an actionable card for episodes that couldn't be downloaded, with
+        Retry / Switch-source / Provide-file controls. ``failures`` is a list of
+        ``{"ep": n, "audio": "subbed"|"dubbed"|...}`` so the card names exactly which
+        version failed. The stuck-state is persisted for the action handlers."""
+        if not self._active():
+            return
+        episodes = sorted({f["ep"] for f in failures})
+        audio_kinds = sorted({f["audio"] for f in failures if f.get("audio")})
+        if self._c.redis:
+            await self._c.redis.set(_K_STUCK.format(code=code), json.dumps({
+                "episodes": episodes, "title": title, "source": source,
+                "audio_kinds": audio_kinds, "alt_source": alt_source,
+            }), ex=86400)
+
+        def _btn(key: str, *parts: str) -> InlineKeyboardButton:
+            return InlineKeyboardButton(t(key), callback_data=cb(*parts))
+
+        buttons = [[_btn(M.CC_BTN_RETRY_EPS, "staff", "aretry", code)]]
+        if alt_source:
+            buttons.append([_btn(M.CC_BTN_SWITCH_SRC, "staff", "aswitch", code)])
+        buttons.append([_btn(M.CC_BTN_PROVIDE, "staff", "aprovide", code)])
+        try:
+            await self._send(S.attention_card(code, title, failures),
+                             reply_markup=InlineKeyboardMarkup(buttons))
+            if self._c.redis:
+                await self._c.redis.set(_K_LAST_BOT, "1")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("logcc.attention_card.failed", error=str(exc))
+
+    async def post_failure_card(
+        self, *, code: str, title: str, stage: str, error: str
+    ) -> None:
+        """Post a prominent, standalone failure card so a failed download/processing
+        job is impossible to miss — distinct from the easy-to-overlook rolling
+        activity line, which we still emit alongside it."""
+        if not self._active():
+            return
+        try:
+            await self._send(S.failure_card(code or "—", title or "—", stage, (error or "")[:300]))
+            if self._c.redis:
+                await self._c.redis.set(_K_LAST_BOT, "1")
+        except Exception as exc:
+            log.warning("logcc.failure_card.failed", error=str(exc))
+
     # ── human discussion: keep staff chatter out of the bot-managed flow ─────────
-    async def note_discussion(self, message_id: int) -> None:
-        """Record a human message posted in the log channel as part of a temporary
-        discussion thread. If it's the first message after bot content, drop a
-        divider so the conversation reads as its own section. The thread is swept
-        after ``discussion_ttl_minutes`` of inactivity."""
+    async def ensure_signatures(self) -> None:
+        """Enable the channel's 'Sign Messages' setting, once, so human posts carry
+        an author signature we can attribute by name. Best-effort and idempotent —
+        the attempt is recorded either way so a failure doesn't retry every message."""
+        if not (self._active() and self._c.redis):
+            return
+        if await self._c.redis.get(_K_SIGNED):
+            return
+        try:
+            from pyrogram.raw.functions.channels import ToggleSignatures
+
+            peer = await self._client.resolve_peer(self.cfg.channel_id)
+            await self._client.invoke(ToggleSignatures(channel=peer, signatures_enabled=True))
+        except Exception as exc:
+            log.debug("logcc.signatures.failed", error=str(exc))
+        await self._c.redis.set(_K_SIGNED, "1")
+
+    @staticmethod
+    def _discussion_name(message) -> str:
+        """Best display name for a human poster: the channel author signature when
+        present, else the sender's name, else a generic label."""
+        sig = getattr(message, "author_signature", None)
+        if sig:
+            return sig
+        user = getattr(message, "from_user", None)
+        if user:
+            full = " ".join(p for p in (user.first_name, user.last_name) if p)
+            return full or getattr(user, "username", None) or "Staff"
+        return "Staff"
+
+    async def note_discussion(self, message) -> None:
+        """Fold a human message into the conversation section.
+
+        The raw message is deleted and reposted as a signed line —
+        ``[<b>Name</b>]: text`` — with a divider sticker opening a fresh thread (or
+        whenever it follows bot-managed content). Non-text messages are left as-is
+        and merely tracked. The thread is swept after ``discussion_ttl_minutes`` idle.
+        """
         if not self._sectioned():
             return
         import time
 
         try:
-            if await self._c.redis.get(_K_LAST_BOT):
-                await self._post_divider()
-                await self._c.redis.delete(_K_LAST_BOT)
+            await self.ensure_signatures()
             raw = await self._c.redis.get(_K_DISCUSSION)
             thread = json.loads(raw) if raw else {"ids": [], "last": 0}
-            thread["ids"].append(message_id)
+            text = (getattr(message, "text", None) or getattr(message, "caption", None) or "").strip()
+
+            if not text:
+                # Non-text human content (sticker/photo): keep it, just track for sweep.
+                thread["ids"].append(message.id)
+                thread["last"] = int(time.time())
+                await self._c.redis.set(_K_DISCUSSION, json.dumps(thread))
+                return
+
+            name = self._discussion_name(message)
+            opening = not thread["ids"] or bool(await self._c.redis.get(_K_LAST_BOT))
+            # Replace the raw message with the formatted conversation line.
+            try:
+                await self._client.delete_messages(self.cfg.channel_id, message.id)
+            except Exception:
+                pass
+            if opening:
+                div = await self._post_divider()
+                if div:
+                    thread["ids"].append(div)
+                await self._c.redis.delete(_K_LAST_BOT)
+            posted = await self._send(S.conversation_line(name, text))
+            thread["ids"].append(posted.id)
             thread["last"] = int(time.time())
             await self._c.redis.set(_K_DISCUSSION, json.dumps(thread))
         except Exception as exc:

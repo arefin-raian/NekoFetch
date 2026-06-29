@@ -157,3 +157,40 @@ class TmdbClient:
         if neutral:
             return neutral[0].get("file_path")
         return sorted(backdrops, key=quality, reverse=True)[0].get("file_path")
+
+    async def _english_poster(self, tmdb_id: int, media_type: str) -> str | None:
+        """Best **English / region-neutral** poster path — the same set TMDB's
+        ``/images/posters?image_language=en&image_region=US`` page shows. English
+        title-art poster first, then language-neutral, ranked by rating/votes/res."""
+        try:
+            imgs = await self._get(f"/{media_type}/{tmdb_id}/images",
+                                   include_image_language="en,null")
+        except (httpx.HTTPError, ValueError):
+            return None
+        posters = imgs.get("posters", [])
+        if not posters:
+            return None
+
+        def quality(b: dict) -> tuple:
+            return (b.get("vote_average") or 0, b.get("vote_count") or 0, b.get("width") or 0)
+
+        for keep in (lambda b: b.get("iso_639_1") == "en",
+                     lambda b: not b.get("iso_639_1"),
+                     lambda b: True):
+            chosen = sorted((b for b in posters if keep(b)), key=quality, reverse=True)
+            if chosen:
+                return chosen[0].get("file_path")
+        return None
+
+    async def poster_for(self, title: str, *, size: str = "w342") -> str | None:
+        """Official English/US poster URL for ``title``, sized for a thumbnail.
+
+        Used to give uploaded files a proper Telegram document thumbnail instead of
+        an ffmpeg frame-grab. Returns ``None`` if TMDB has no match."""
+        res = await self.search(title)
+        if res is None:
+            return None
+        path = await self._english_poster(res.id, res.media_type)
+        if path:
+            return f"{IMG_BASE}/{size}{path}"
+        return res.poster_url

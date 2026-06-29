@@ -224,7 +224,11 @@ class LogChannelConfig(BaseModel):
     cover_image: str = ""
     # Minutes of inactivity before a human discussion thread is auto-deleted.
     discussion_ttl_minutes: int = 5
-    refresh_seconds: int = 60
+    refresh_seconds: int = 60                 # full rebuild of all sections
+    # The active-tasks panel gets a fast lane: live downloads/processing update on
+    # this short interval so the progress bar feels responsive, while the heavier
+    # dashboard/catalog/completed panels stay on the slower full refresh above.
+    active_refresh_seconds: int = 5
     # 'all' = everything; otherwise a subset of categories to forward.
     events: list[str] = Field(default_factory=lambda: ["all"])
 
@@ -260,6 +264,17 @@ class AcquisitionConfig(BaseModel):
     resolutions: list[str] = Field(default_factory=lambda: ["360p", "540p", "720p", "1080p"])
     languages: list[str] = Field(default_factory=lambda: ["english", "japanese"])
     require_english_subs: bool = True
+    # Mandatory qualities to grab for every request (best-first). Each is fetched
+    # when the source offers it; 480p is special-cased with a fallback ladder
+    # below so we never ship nothing at the SD tier.
+    target_resolutions: list[str] = Field(
+        default_factory=lambda: ["1080p", "720p", "480p"]
+    )
+    # When a target resolution is missing, try these alternates in order. Only the
+    # first available alternate is taken, so we don't double up the same tier.
+    resolution_fallbacks: dict[str, list[str]] = Field(
+        default_factory=lambda: {"480p": ["540p", "360p"]}
+    )
 
 
 class MainChannelConfig(BaseModel):

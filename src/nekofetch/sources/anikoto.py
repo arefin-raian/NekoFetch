@@ -56,6 +56,12 @@ def _rank_by_title(query: str, results: list[AnimeStub]) -> list[AnimeStub]:
 BASE_URL = "https://anikototv.to"
 MAPPER_API = "https://mapper.nekostream.site/api/mal/"
 
+# Header only the site's XHR/AJAX endpoints (ajax/server, getSources, mapper) want.
+# It must NOT ride on the actual playlist/segment CDN fetches: a real <video> tag
+# never sends it, and a Cloudflare-fronted segment host reads it as scraper traffic
+# and answers 521. Sending it only on the JSON endpoints keeps both sides happy.
+_XHR = {"x-requested-with": "XMLHttpRequest"}
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -82,8 +88,12 @@ class AnikotoSource(AnimeSource):
                 timeout=RECOMMENDED_TIMEOUT,
                 limits=RECOMMENDED_LIMITS,
                 headers={
+                    # Browser-like defaults that are safe on EVERY request, incl. the
+                    # CDN segment fetches. The XHR marker is added per-call only on the
+                    # AJAX endpoints (see _XHR) so segment requests stay browser-shaped.
                     "User-Agent": USER_AGENT,
-                    "x-requested-with": "XMLHttpRequest",
+                    "Accept": "*/*",
+                    "Accept-Language": "en-US,en;q=0.9",
                 },
                 follow_redirects=True,
             )
@@ -212,14 +222,21 @@ class AnikotoSource(AnimeSource):
             return []
         video_id = search.group(1)
 
+        # This AJAX endpoint REQUIRES the XHR marker + a same-site referer — without
+        # them it returns {"status":500,"result":"bad request"} and we'd see zero
+        # episodes (verified against the live site via a real browser capture).
         ep_resp = await self.http.get(
-            f"{self.base_url}/ajax/episode/list/{video_id}?vrf="
+            f"{self.base_url}/ajax/episode/list/{video_id}?vrf=",
+            headers={"referer": url, **_XHR},
         )
         ep_resp.raise_for_status()
         data = ep_resp.json()
-        html_code = data.get("result", "")
-        if not html_code:
+        if data.get("status") != 200 or not data.get("result"):
+            log.warning("anikoto.episode_list.unexpected",
+                        video_id=video_id, status=data.get("status"),
+                        body=str(data)[:160])
             return []
+        html_code = data["result"]
 
         soup = BeautifulSoup(html_code, "html.parser")
         episodes: list[Episode] = []
@@ -328,23 +345,54 @@ class AnikotoSource(AnimeSource):
         await self._collect_mapper(data_mal, episode_ref, data_timestamp, add)
         await self._collect_server_list(data_ids, add)
 
+        # Surface exactly how many servers we enumerated per audio track and their
+        # CDN hosts — so a "download failed" can be reasoned about (were all servers
+        # actually tried?) instead of guessed at.
+        def _host(u: str) -> str:
+            m = re.match(r"https?://([^/]+)", u or "")
+            return m.group(1) if m else "?"
+        log.info(
+            "anikoto.servers.enumerated", episode=episode_ref,
+            sub=[_host(c["video_url"]) for c in candidates[AudioType.SUBBED]],
+            dub=[_host(c["video_url"]) for c in candidates[AudioType.DUBBED]],
+        )
+
         variants: list[VideoVariant] = []
         for audio, cands in candidates.items():
             if not cands:
                 continue
             # Soft-sub before hard-sub so selectable subtitles win when available.
             cands.sort(key=lambda c: {"sub": 0, "hsub": 1, "dub": 0}.get(c["kind"], 2))
-            variants.append(
-                VideoVariant(
-                    source_ref=json.dumps({
-                        "candidates": cands,
-                        "quality": self.preferred_quality,
-                    }),
-                    resolution=f"{self.preferred_quality}p",
-                    audio=audio,
+            # Emit ONE variant per resolution the stream actually offers (1080/720/480…)
+            # so the worker can honour the all-qualities policy — not a single fixed
+            # 1080p. Falls back to the preferred quality if the master can't be read.
+            qualities = await self._available_qualities(cands)
+            for q in qualities:
+                variants.append(
+                    VideoVariant(
+                        source_ref=json.dumps({"candidates": cands, "quality": q}),
+                        resolution=f"{q}p",
+                        audio=audio,
+                    )
                 )
-            )
         return variants
+
+    async def _available_qualities(self, cands: list[dict]) -> list[str]:
+        """Resolution heights the stream offers (best-first), discovered from the
+        first candidate's master playlist; falls back to the preferred quality."""
+        from nekofetch.sources._hls import list_master_qualities
+
+        for cand in cands:
+            url = cand.get("video_url", "")
+            if ".m3u8" not in url:
+                continue
+            referer = cand.get("referer", self.base_url)
+            qs = await list_master_qualities(
+                self.http, url, {"referer": referer, "origin": referer.rstrip("/")}
+            )
+            if qs:
+                return qs
+        return [self.preferred_quality]
 
     async def dual_audio_plan(self, episode_ref: str) -> dict:
         """Assess whether one dual-audio file can be built for this episode.
@@ -393,7 +441,7 @@ class AnikotoSource(AnimeSource):
             ep_no = self._ep_number_from_ref(episode_ref)
             r = await self.http.get(
                 f"{MAPPER_API}{data_mal}/{ep_no}/{data_timestamp}",
-                headers={"referer": self.base_url, "origin": self.base_url},
+                headers={"referer": self.base_url, "origin": self.base_url, **_XHR},
             )
             if r.status_code != 200:
                 return
@@ -424,7 +472,8 @@ class AnikotoSource(AnimeSource):
         """
         try:
             r = await self.http.get(
-                f"{self.base_url}/ajax/server/list", params={"servers": data_ids}
+                f"{self.base_url}/ajax/server/list", params={"servers": data_ids},
+                headers={"referer": f"{self.base_url}/", **_XHR},
             )
             if r.status_code != 200:
                 return
@@ -502,7 +551,8 @@ class AnikotoSource(AnimeSource):
     async def _resolve_server(self, code: str, *, decode: bool = True) -> str:
         """Resolve an ``ajax/server`` code to a playable URL (optionally b64-decoded)."""
         try:
-            r = await self.http.get(f"{self.base_url}/ajax/server", params={"get": code})
+            r = await self.http.get(f"{self.base_url}/ajax/server", params={"get": code},
+                                    headers={"referer": f"{self.base_url}/", **_XHR})
             if r.status_code != 200:
                 return ""
             url = r.json().get("result", {}).get("url", "")
@@ -550,22 +600,31 @@ class AnikotoSource(AnimeSource):
         if on_progress:
             await on_progress(0, 1)
 
+        from nekofetch.sources._diagnostics import classify
+
         last_error = "no candidates"
+        total = len(candidates)
         for idx, cand in enumerate(candidates):
             url = cand["video_url"]
             referer = cand.get("referer", self.base_url)
+            host_m = re.match(r"https?://([^/]+)", url)
+            log.info("anikoto.server.try", server=f"{idx + 1}/{total}",
+                     kind=cand.get("kind"), host=host_m.group(1) if host_m else "?")
             try:
                 if ".m3u8" in url:
                     out = await self._download_hls(url, referer, dest, quality, on_progress)
                 else:
                     out = await self._download_direct(url, referer, dest, on_progress)
             except Exception as exc:  # noqa: BLE001 - try the next server
-                last_error = str(exc)
+                # Classify the failure so the log/last_error names the precise cause
+                # (dead host vs WAF block vs expired token), shared with every source.
+                kind, reason = classify(exc)
+                last_error = f"{host_m.group(1) if host_m else '?'}: {kind.value} — {reason}"
+                nxt = "falling back to next server" if idx + 1 < total else "no more servers"
                 log.warning(
-                    "anikoto.candidate.failed",
-                    index=idx,
-                    kind=cand.get("kind"),
-                    error=last_error,
+                    "anikoto.server.failed",
+                    server=f"{idx + 1}/{total}", kind=cand.get("kind"),
+                    failure=kind.value, reason=reason, action=nxt,
                 )
                 continue
 

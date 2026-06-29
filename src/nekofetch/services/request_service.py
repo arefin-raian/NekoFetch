@@ -124,6 +124,30 @@ class RequestService:
         )
         return req
 
+    async def retry_episodes(
+        self, code: str, episodes: list[int], *, new_source: str | None = None
+    ) -> Request:
+        """Re-queue a request for ONLY the given (previously stuck) episode numbers,
+        optionally switching to a different source. The download worker filters by
+        ``req.episodes``, so a fresh job re-attempts just those episodes without
+        re-downloading the whole series."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            req = await RequestRepository(session).get_by_code(code)
+            if req is None:
+                raise NotFound(code)
+            req.episodes = sorted(set(episodes)) or None
+            if new_source:
+                req.source = new_source
+            req.status = RequestStatus.QUEUED
+            await session.flush()
+            title, source = req.anime_title, req.source
+            session.expunge(req)
+        from nekofetch.services.log_channel_service import LogChannelService
+        await LogChannelService(self._c).event(
+            "request", "retry", code=code, anime=title, source=source,
+        )
+        return req
+
     async def update_source_ref(self, code: str, source: str, source_ref: str) -> None:
         """Pin a request to a specific source + native ref (e.g. a chosen torrent)."""
         async with session_scope(self._c.pg_sessionmaker) as session:

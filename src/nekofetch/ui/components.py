@@ -94,3 +94,32 @@ def keyboard(*rows: list[tuple[str, str]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(label, callback_data=data) for label, data in row] for row in rows]
     )
+
+
+def disabled_markup(markup: InlineKeyboardMarkup | None) -> InlineKeyboardMarkup | None:
+    """Return a copy of ``markup`` with every button neutralized.
+
+    Labels are kept (so the panel still reads the same) but every callback is
+    routed to ``noop`` — the button stays *visible but inert*, which is what we
+    want while the next screen loads: disabled, not hidden, so it can't be
+    double-fired. Returns ``None`` when there's nothing to disable.
+    """
+    if markup is None or not getattr(markup, "inline_keyboard", None):
+        return None
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(b.text, callback_data=cb("noop")) for b in row]
+         for row in markup.inline_keyboard]
+    )
+
+
+async def lock_buttons(q) -> None:
+    """Immediately neutralize the buttons on the message a callback fired from.
+
+    Call this at the very top of a flow handler, before any slow async work, so a
+    second tap during the load window hits inert ``noop`` buttons instead of
+    re-triggering the action. Best-effort — purely cosmetic, never raises.
+    """
+    try:
+        await q.message.edit_reply_markup(disabled_markup(q.message.reply_markup))
+    except Exception:
+        pass

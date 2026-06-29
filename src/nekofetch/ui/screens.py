@@ -246,7 +246,9 @@ def choose_version(query: str, versions: list[dict]) -> Screen:
         rows.append(f"{_esc(v['title'])[:24].ljust(width)} :  <i>{_esc(meta)}</i>")
     btns = [[(v["title"][:32], cb("ver_pick", v.get("id", i)))]
             for i, v in enumerate(versions)]
-    btns.append([(t(M.BTN_VERSION_NEITHER), cb("series_no"))])
+    # 'Both' folds every adaptation into one combined request; 'Neither' restarts.
+    btns.append([(t(M.BTN_VERSION_BOTH), cb("ver_pick_both")),
+                 (t(M.BTN_VERSION_NEITHER), cb("series_no"))])
     return Screen(caption="\n".join(rows), image=pick_artwork(), keyboard=_kb(btns))
 
 

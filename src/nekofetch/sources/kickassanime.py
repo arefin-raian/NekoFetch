@@ -390,6 +390,7 @@ class KickAssAnimeSource(AnimeSource):
                         "quality": q,
                         "player_url": stream["player_url"],
                         "subtitles": stream["subtitles"],
+                        "alt_servers": stream.get("alt_servers", []),
                         # context for cross-language (separate-variant) merging:
                         "kaa_slug": slug,
                         "kaa_locale": lang,
@@ -424,7 +425,11 @@ class KickAssAnimeSource(AnimeSource):
             log.warning("get_variants.api_failed", url=url, status=resp.status_code)
             servers = await self._scrape_servers_from_page(f"{self.base_url}/{slug}/{ep_path}")
 
-        for server in servers:
+        # Log every server we enumerated so a failure can be reasoned about (were
+        # all mirrors actually tried?) — parity with anikoto.servers.enumerated.
+        log.info("kickass.servers.enumerated", count=len(servers),
+                 names=[s.get("name") for s in servers])
+        for idx, server in enumerate(servers):
             video = await self._extract_video(server.get("src", ""), server.get("name", ""))
             if not video:
                 continue
@@ -442,6 +447,13 @@ class KickAssAnimeSource(AnimeSource):
                 "subtitles": [
                     (s.get("name", ""), _fix_url(s.get("src", "")))
                     for s in video.get("subtitles", [])
+                ],
+                # Every OTHER server, kept unresolved as a download-time fallback so a
+                # dead CDN host on the primary doesn't fail the episode — resolved
+                # lazily in download() only if the primary actually fails.
+                "alt_servers": [
+                    {"name": s.get("name", ""), "src": s.get("src", "")}
+                    for j, s in enumerate(servers) if j != idx and s.get("src")
                 ],
             }
         return None
@@ -668,45 +680,70 @@ class KickAssAnimeSource(AnimeSource):
         on_progress: ProgressCallback | None = None,
         resume_state: dict | None = None,
     ) -> dict:
-        info = json.loads(variant.source_ref)
-        video_url = info["video_url"]
-        quality = info.get("quality", variant.resolution)
-        player_url = info.get("player_url", "")
-        subs = info.get("subtitles", [])
+        from nekofetch.sources._diagnostics import classify
 
+        info = json.loads(variant.source_ref)
+        quality = info.get("quality", variant.resolution)
+        default_lang = "en" if variant.audio == AudioType.DUBBED else "ja"
         dest.parent.mkdir(parents=True, exist_ok=True)
         if on_progress:
             await on_progress(0, 1)
 
-        # Episode language only hints the fallback label when a stream has no
-        # separate audio renditions (embedded audio of unknown language).
-        default_lang = "en" if variant.audio == AudioType.DUBBED else "ja"
+        async def _attempt(video_url: str, player_url: str, sub_list: list) -> dict:
+            """Run one server's stream to a finished file, or raise on failure."""
+            if ".m3u8" in video_url:
+                out, extra = await self._download_hls(
+                    video_url, dest, player_url=player_url, subtitles=sub_list,
+                    quality=quality, on_progress=on_progress, default_lang=default_lang,
+                    locale=info.get("kaa_locale", ""),
+                )
+            else:
+                out, extra = await self._download_direct(
+                    video_url, dest, player_url, sub_list, on_progress,
+                )
+            total = out.stat().st_size
+            if on_progress:
+                await on_progress(total, total)
+            sha = hashlib.sha256()
+            sha.update(out.read_bytes())
+            return {"checksum": sha.hexdigest(), "bytes": total, "complete": True,
+                    "container": out.suffix.lstrip("."), **extra}
 
-        if ".m3u8" in video_url:
-            out, extra = await self._download_hls(
-                video_url, dest, player_url=player_url, subtitles=subs,
-                quality=quality, on_progress=on_progress, default_lang=default_lang,
-                locale=info.get("kaa_locale", ""),
-            )
-        else:
-            out, extra = await self._download_direct(
-                video_url, dest, player_url, subs, on_progress,
-            )
+        # Try the resolved primary server, then EVERY alternate mirror (resolved
+        # lazily) before giving up — a dead CDN host on one server must never fail
+        # the episode while another mirror is up. Each failure is classified so the
+        # final error names the precise cause, not a generic "download failed".
+        tried: set[str] = set()
+        last = "no playable server"
+        primary = info["video_url"]
+        tried.add(primary)
+        try:
+            return await _attempt(primary, info.get("player_url", ""), info.get("subtitles", []))
+        except Exception as exc:  # noqa: BLE001
+            kind, reason = classify(exc)
+            last = f"{info.get('server')}: {kind.value} — {reason}"
+            log.warning("kickass.server.failed", server=info.get("server"), reason=last)
 
-        total = out.stat().st_size
-        if on_progress:
-            await on_progress(total, total)
+        for srv in info.get("alt_servers", []):
+            video = await self._extract_video(srv.get("src", ""), srv.get("name", ""))
+            if not video:
+                continue
+            hls = _fix_url(video.get("hls", "") or video.get("dash", ""))
+            if not hls or hls in tried:
+                continue
+            tried.add(hls)
+            sub_list = [(s.get("name", ""), _fix_url(s.get("src", "")))
+                        for s in video.get("subtitles", [])] or info.get("subtitles", [])
+            try:
+                return await _attempt(hls, video.get("player_url", srv.get("src", "")), sub_list)
+            except Exception as exc:  # noqa: BLE001
+                kind, reason = classify(exc)
+                last = f"{srv.get('name')}: {kind.value} — {reason}"
+                log.warning("kickass.server.failed", server=srv.get("name"), reason=last)
 
-        sha = hashlib.sha256()
-        sha.update(out.read_bytes())
-
-        return {
-            "checksum": sha.hexdigest(),
-            "bytes": total,
-            "complete": True,
-            "container": out.suffix.lstrip("."),
-            **extra,
-        }
+        raise RuntimeError(
+            f"all {len(tried)} KickAssAnime server(s) tried, none playable; last: {last}"
+        )
 
     async def _retry_get(self, url: str, headers: dict, retries: int = 5) -> httpx.Response:
         for attempt in range(retries):

@@ -282,5 +282,5 @@ def _art():
 
 
 def _ts() -> str:
-    from datetime import UTC, datetime
-    return datetime.now(UTC).strftime("%H:%M:%S UTC")
+    from nekofetch.core.timefmt import now_label
+    return now_label()

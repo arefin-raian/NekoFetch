@@ -129,8 +129,9 @@ def build_distribution_bot(
 
         try:
             until = await AccessService(container).redeem(token, message.from_user.id)
+            from nekofetch.core.timefmt import to_display
             await message.reply(
-                bq(f"✓ access granted until <code>{until:%Y-%m-%d %H:%M} UTC</code>."),
+                bq(f"✓ access granted until <code>{to_display(until)}</code>."),
                 parse_mode=ParseMode.HTML,
             )
         except NekoFetchError as exc:

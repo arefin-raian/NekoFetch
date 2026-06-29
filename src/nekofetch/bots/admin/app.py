@@ -20,6 +20,10 @@ def build_admin_bot(container: Container) -> Client:
         bot_token=env.admin_bot_token,
         workdir=str(env.session_path),
         plugins=None,
+        # This client uploads the processed packs to the storage channel. Pyrogram
+        # defaults to a single in-flight file transmission, which makes large
+        # uploads crawl; raising it lets chunks transfer in parallel.
+        max_concurrent_transmissions=4,
     )
     # Make shared services reachable from handlers.
     client.container = container  # type: ignore[attr-defined]

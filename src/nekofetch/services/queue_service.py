@@ -29,6 +29,13 @@ class QueueRow:
     current_episode: int | None = None
     downloaded_bytes: int = 0
     total_bytes: int = 0
+    stage: str | None = None
+    season: int | None = None
+    episode_index: int | None = None
+    total_episodes: int | None = None
+    label: str | None = None
+    resolution: str | None = None
+    audio: str | None = None
 
 
 class QueueService:
@@ -75,9 +82,54 @@ class QueueService:
                         current_episode=(snap.current_episode if snap else job.current_episode),
                         downloaded_bytes=(snap.downloaded_bytes if snap else job.downloaded_bytes),
                         total_bytes=(snap.total_bytes if snap else job.total_bytes),
+                        stage=(snap.stage if snap else None),
+                        season=(snap.season if snap else None),
+                        episode_index=(snap.episode_index if snap else None),
+                        total_episodes=(snap.total_episodes if snap else None),
+                        label=(snap.label if snap else None),
+                        resolution=(snap.resolution if snap else None),
+                        audio=(snap.audio if snap else None),
                     )
                 )
             return rows
+
+    async def cancel(self, job_id: int) -> bool:
+        """Cancel a single job entirely: mark it CANCELLED in the DB, signal a
+        running worker to abort mid-download, and drop its live progress so it
+        leaves ACTIVE TASKS. Works for running, queued, and orphaned/ghost jobs."""
+        cancelled = False
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            job = await session.get(DownloadJob, job_id)
+            if job is not None and job.status in {
+                JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED,
+            }:
+                job.status = JobStatus.CANCELLED
+                req = await RequestRepository(session).get(job.request_id)
+                if req is not None:
+                    req.status = RequestStatus.FAILED
+                cancelled = True
+        if self._c.progress:
+            await self._c.progress.delete(job_id)
+        if self._c.redis:  # also signal any worker actively running this job to stop
+            await self._c.redis.set(f"nf:job:{job_id}:cancel", "1", ex=600)
+        return cancelled
+
+    async def cancel_all_active(self) -> int:
+        """Cancel EVERY active/queued/orphaned job and clear their live progress —
+        the 'wipe the download state' button. Returns how many were cancelled."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            jobs = await QueueRepository(session).by_status(
+                JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.PAUSED,
+            )
+            ids = [j.id for j in jobs]
+            for job in jobs:
+                job.status = JobStatus.CANCELLED
+        for jid in ids:
+            if self._c.progress:
+                await self._c.progress.delete(jid)
+            if self._c.redis:
+                await self._c.redis.set(f"nf:job:{jid}:cancel", "1", ex=600)
+        return len(ids)
 
     async def counts(self) -> dict[str, int]:
         async with session_scope(self._c.pg_sessionmaker) as session:

@@ -25,6 +25,12 @@ class ProgressSnapshot:
     current_episode: int | None = None
     eta_seconds: int | None = None
     label: str | None = None
+    stage: str | None = None       # human stage: Downloading / Compressing / Muxing …
+    resolution: str | None = None  # e.g. "1080p" — the variant currently in flight
+    audio: str | None = None       # "subbed" / "dubbed" / "dual_audio"
+    season: int | None = None
+    episode_index: int | None = None   # n-th of total_episodes
+    total_episodes: int | None = None
 
 
 class ProgressStore:
@@ -40,3 +46,8 @@ class ProgressStore:
         if not raw:
             return None
         return ProgressSnapshot(**json.loads(raw))
+
+    async def delete(self, job_id: int) -> None:
+        """Drop a job's live-progress snapshot — used when a job is cancelled or
+        recovered at startup so ACTIVE TASKS stops showing a phantom download."""
+        await self._redis.delete(REDIS_PROGRESS.format(job_id=job_id))

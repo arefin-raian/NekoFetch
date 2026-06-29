@@ -127,10 +127,15 @@ class StorageChannelService:
         file_paths: list[Path],
         episode_from: int | None = None,
         episode_to: int | None = None,
+        thumb: Path | None = None,
     ) -> StoragePack:
-        """Post header, upload files in order, post the end sticker; record the range."""
+        """Post header, upload files in order, post the end sticker; record the range.
+
+        ``thumb`` (when present) is the request's poster, attached to every document
+        so the files show a proper cover in Telegram instead of a blank icon."""
         client = self._client
         channel_id = self.cfg.channel_id
+        thumb_arg = str(thumb) if thumb and thumb.exists() else None
 
         header = await client.send_message(
             channel_id,
@@ -139,7 +144,7 @@ class StorageChannelService:
         )
         file_ids: list[int] = []
         for path in file_paths:
-            sent = await client.send_document(channel_id, str(path))
+            sent = await client.send_document(channel_id, str(path), thumb=thumb_arg)
             file_ids.append(sent.id)
 
         end_id = file_ids[-1] if file_ids else header.id

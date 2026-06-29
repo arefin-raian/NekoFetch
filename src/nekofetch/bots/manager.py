@@ -168,6 +168,11 @@ class BotManager:
             self._scheduler.every(
                 self._c.config.log_channel.refresh_seconds, log_svc.refresh, id="log-pins-refresh"
             )
+            # Fast lane: keep the active-tasks progress bar responsive between full refreshes.
+            self._scheduler.every(
+                self._c.config.log_channel.active_refresh_seconds,
+                log_svc.refresh_active, id="log-active-refresh",
+            )
 
         self._scheduler.start()
 

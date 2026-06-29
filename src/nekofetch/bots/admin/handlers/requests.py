@@ -25,6 +25,7 @@ from nekofetch.core.container import Container
 from nekofetch.core.exceptions import NekoFetchError
 from nekofetch.domain.enums import DownloadScope
 from nekofetch.localization.messages import M, t
+from nekofetch.ui.components import lock_buttons
 from nekofetch.ui.progress import SPINNER, animate_until
 from nekofetch.ui.screens import (
     Screen,
@@ -165,6 +166,7 @@ def register(client: Client, container: Container) -> None:
     # ──────────────────────────────────────────────────────────────────────────
     @client.on_callback_query(filters.regex(r"^ver_pick\|"))
     async def _ver_pick(_: Client, q: CallbackQuery) -> None:
+        await lock_buttons(q)  # neutralize the picker so the fetch can't double-fire
         _, args = q.data.split("|", 1)
         picked_id = args
         _, data = await fsm.get(q.from_user.id)
@@ -227,17 +229,87 @@ def register(client: Client, container: Container) -> None:
         await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
         await q.answer()
 
+    @client.on_callback_query(filters.regex(r"^ver_pick_both$"))
+    async def _ver_pick_both(_: Client, q: CallbackQuery) -> None:
+        """'Both' — fold every listed adaptation into a SINGLE combined franchise
+        request. The first adaptation seeds the card; the rest have their franchise
+        totals summed in, their ids recorded, and the title joined, so one request
+        represents the whole set (e.g. Hellsing + Hellsing Ultimate)."""
+        await lock_buttons(q)
+        _, data = await fsm.get(q.from_user.id)
+        versions = data.get("versions", [])
+        query = data.get("query", "Anime")
+        if not versions:
+            await q.answer()
+            return
+
+        base = versions[0]
+        base_id = base.get("anilist_id") or base.get("id")
+        try:
+            refetched = await container.anilist._fetch_full(int(base_id))
+        except (ValueError, TypeError):
+            refetched = None
+        if refetched:
+            franchise_data = _media_to_franchise_dict(refetched)
+        else:
+            franchise_data = {
+                "title": base.get("title", query), "anilist_id": str(base_id),
+                "genres": [], "relations": [], "_source": "anilist",
+            }
+        await _apply_franchise_totals(franchise_data)
+
+        # Fold the remaining adaptations' totals/ids into the combined request.
+        _TOTAL_FIELDS = (
+            ("franchise_seasons", "seasons"), ("franchise_episodes", "episodes"),
+            ("franchise_movies", "movies"), ("franchise_ovas", "ovas"),
+            ("franchise_onas", "onas"), ("franchise_specials", "specials"),
+        )
+        combined_ids = [str(base_id)] if base_id else []
+        titles = [base.get("title") or franchise_data.get("title")]
+        for v in versions[1:]:
+            vid = v.get("anilist_id") or v.get("id")
+            titles.append(v.get("title"))
+            if vid:
+                combined_ids.append(str(vid))
+            try:
+                totals = await container.anilist.franchise_totals(int(vid))
+            except Exception:
+                continue
+            for field, attr in _TOTAL_FIELDS:
+                cur = franchise_data.get(field) or 0
+                franchise_data[field] = (cur + (getattr(totals, attr, 0) or 0)) or None
+
+        franchise_data["title"] = " + ".join(x for x in titles if x) or query
+        franchise_data["combined_ids"] = combined_ids
+        franchise_data["_combined"] = True
+
+        search_title = franchise_data.get("english") or base.get("title") or franchise_data["title"]
+        backdrop_path = await _enrich_with_tmdb(franchise_data, search_title)
+        franchise_data["_backdrop_url"] = backdrop_path
+
+        await fsm.set(q.from_user.id, STATE_FRANCHISE, franchise=franchise_data, query=query)
+        screen = confirm_franchise(franchise_data, backdrop_path=backdrop_path)
+        await send_screen(client, q.message.chat.id, screen, old_msg=q.message)
+        await q.answer()
+
     # ──────────────────────────────────────────────────────────────────────────
     # Confirmation / rejection
     # ──────────────────────────────────────────────────────────────────────────
     @client.on_callback_query(filters.regex(r"^series_yes\|"))
     async def _confirm(_: Client, q: CallbackQuery) -> None:
+        await lock_buttons(q)  # disable the confirm card so it can't be submitted twice
         _, data = await fsm.get(q.from_user.id)
         franchise_data = data.get("franchise", {})
         query = data.get("query", franchise_data.get("title", "Anime"))
         name = q.from_user.first_name if q.from_user else ""
         await q.answer()
         await _finalize(q.message, q.from_user.id, name, franchise_data, query=query)
+
+    @client.on_callback_query(filters.regex(r"^noop$"))
+    async def _noop(_: Client, q: CallbackQuery) -> None:
+        # Inert button (disabled control / pagination indicator) — just dismiss the
+        # client-side spinner so a tap on a locked button feels intentional.
+        await q.answer()
 
     @client.on_callback_query(filters.regex(r"^series_no$"))
     async def _reject(_: Client, q: CallbackQuery) -> None:
@@ -383,7 +455,9 @@ def register(client: Client, container: Container) -> None:
             return
         franchise_data.update(
             franchise_seasons=totals.seasons,
-            franchise_episodes=totals.episodes or None,
+            # Never let the graph walk zero-out a known episode count — keep the
+            # main entry's own count (set by _media_to_franchise_dict) as a floor.
+            franchise_episodes=totals.episodes or franchise_data.get("franchise_episodes"),
             franchise_movies=totals.movies,
             franchise_ovas=totals.ovas,
             franchise_onas=totals.onas,

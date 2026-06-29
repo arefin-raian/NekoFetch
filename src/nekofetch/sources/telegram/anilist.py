@@ -52,6 +52,7 @@ query ($id: Int) {
     episodes
     duration
     status
+    nextAiringEpisode { episode }
     averageScore
     popularity
     favourites
@@ -70,6 +71,7 @@ query ($id: Int) {
           format
           status
           episodes
+          nextAiringEpisode { episode }
           title { romaji english native }
           coverImage { large }
         }
@@ -83,6 +85,22 @@ query ($id: Int) {
 _SERIES_FORMATS = {"TV", "TV_SHORT"}
 # Real anime formats (excludes MANGA / NOVEL / ONE_SHOT source material).
 _ANIME_FORMATS = {"TV", "TV_SHORT", "MOVIE", "OVA", "ONA", "SPECIAL"}
+# Installments that don't exist yet (or never will) — never part of the franchise
+# the user can actually get. We are not a manga distributor and don't list vapor.
+_EXCLUDED_STATUS = {"NOT_YET_RELEASED", "CANCELLED"}
+
+
+def _aired_episodes(media: dict) -> int | None:
+    """Best episode count for an entry: the final total when AniList knows it,
+    else the number already aired (``nextAiringEpisode - 1``) for a still-running
+    show, else ``None``. Stops a currently-airing series rendering as "?"."""
+    eps = media.get("episodes")
+    if eps:
+        return eps
+    nxt = (media.get("nextAiringEpisode") or {}).get("episode")
+    if nxt and nxt > 1:
+        return nxt - 1
+    return None
 # Relation kinds that represent actual franchise *content* (watchable). Excludes
 # ADAPTATION (the source manga/novel), CHARACTER (joke shorts), OTHER, SOURCE.
 _CONTENT_RELATIONS = {
@@ -106,11 +124,13 @@ query ($ids: [Int]) {
     media(id_in: $ids, type: ANIME) {
       id
       format
+      status
       episodes
+      nextAiringEpisode { episode }
       relations {
         edges {
           relationType
-          node { id type format episodes }
+          node { id type format status episodes }
         }
       }
     }
@@ -349,7 +369,12 @@ class AnilistClient:
                 mid = m.get("id")
                 if mid is None:
                     continue
-                nodes[mid] = (m.get("format"), m.get("episodes"))
+                # Skip not-yet-released / cancelled installments entirely (but never
+                # the root the user actually asked about). ``continue`` also skips
+                # their edges, so we don't expand vapor branches into the totals.
+                if mid != root_id and m.get("status") in _EXCLUDED_STATUS:
+                    continue
+                nodes[mid] = (m.get("format"), _aired_episodes(m))
                 for edge in m.get("relations", {}).get("edges", []):
                     rtype = edge.get("relationType")
                     if rtype not in _TRAVERSE_RELATIONS:
@@ -357,7 +382,9 @@ class AnilistClient:
                     node = edge.get("node") or {}
                     nid = node.get("id")
                     if not (node.get("type") == "ANIME"
-                            and node.get("format") in _ANIME_FORMATS and nid is not None):
+                            and node.get("format") in _ANIME_FORMATS
+                            and node.get("status") not in _EXCLUDED_STATUS
+                            and nid is not None):
                         continue
                     if rtype in _CONTINUATION_RELATIONS:  # SEQUEL / PREQUEL
                         cont_adj.setdefault(mid, set()).add(nid)
@@ -396,6 +423,14 @@ class AnilistClient:
                 totals.onas += 1
             elif fmt == "SPECIAL":
                 totals.specials += 1
+        # When the root isn't a TV season (it's an ONA/OVA/Special with its own
+        # episode count), THAT count is the title's episode count — otherwise an
+        # ONA-only entry like a 6-episode ONA would report 0 episodes. Spin-off and
+        # side-story episode counts are still deliberately excluded.
+        if root_id not in season_ids:
+            root_fmt, root_eps = nodes.get(root_id, (None, None))
+            if root_fmt and root_fmt != "MOVIE":
+                totals.episodes += root_eps or 0
         return totals
 
     def _parse_media(self, media: dict) -> AnilistMedia:
@@ -416,11 +451,17 @@ class AnilistClient:
         relations = []
         for edge in media.get("relations", {}).get("edges", []):
             node = edge.get("node", {})
+            fmt = node.get("format")
+            status = node.get("status")
+            # Only real, released anime installments belong in the franchise — no
+            # manga/novel source material, no not-yet-released or cancelled entries.
+            if fmt not in _ANIME_FORMATS or status in _EXCLUDED_STATUS:
+                continue
             relations.append(FranchiseRelation(
                 relation=edge.get("relationType", ""),
-                format=node.get("format"),
-                status=node.get("status"),
-                episodes=node.get("episodes"),
+                format=fmt,
+                status=status,
+                episodes=_aired_episodes(node),
                 titles=[t for t in titles_of(node.get("title", {})) if t],
                 anilist_id=node.get("id"),
                 cover_url=node.get("coverImage", {}).get("large"),
@@ -442,7 +483,7 @@ class AnilistClient:
         franchise_specials = sum(1 for r in content if r.format == "SPECIAL")
 
         # Total episodes across the main entry + its season continuations.
-        total_ep = media.get("episodes") or 0
+        total_ep = _aired_episodes(media) or 0
         for s in season_entries:
             if s.episodes is not None:
                 total_ep += s.episodes
@@ -464,7 +505,7 @@ class AnilistClient:
             format=media.get("format"),
             season=media.get("season"),
             year=media.get("seasonYear"),
-            episodes=media.get("episodes"),
+            episodes=_aired_episodes(media),
             duration=media.get("duration"),
             status=media.get("status"),
             score=score,

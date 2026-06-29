@@ -58,6 +58,51 @@ ProgressCb = Callable[[int, int], Awaitable[None]] | None
 _RETRYABLE = {429, 500, 502, 503, 504, 520, 521, 522, 524}
 
 
+class _Breaker:
+    """Circuit breaker for a single HLS download.
+
+    A flaky origin (e.g. Cloudflare 521 'origin down') can return a transient,
+    retryable error on most segments. Retrying each one individually means the
+    download *crawls* instead of failing — it never raises, so the source never
+    falls back to its next candidate server. This counts retryable hits across
+    ALL segments and, once they cross a budget, trips: the next segment to check
+    raises, aborting the whole download fast so the caller can fall back.
+    """
+
+    __slots__ = ("budget", "fails", "tripped", "diag", "kind")
+
+    def __init__(self, budget: int) -> None:
+        self.budget = budget
+        self.fails = 0
+        self.tripped = False
+        self.diag = ""   # first failure's classified cause (kind + concrete reason)
+        self.kind = None
+
+    def record(self, resp: httpx.Response | None, exc: Exception | None = None) -> None:
+        """Capture the FIRST failure's classified cause so the abort says exactly
+        what went wrong — dead host vs WAF block vs expired token vs rate limit —
+        instead of a vague 'download failed'. Shared with every web source via
+        :mod:`nekofetch.sources._diagnostics`."""
+        if self.diag:
+            return
+        from nekofetch.sources._diagnostics import classify
+        kind, reason = classify(resp if resp is not None else exc)
+        self.kind = kind
+        self.diag = f"{kind.value}: {reason}"
+
+    def hit(self) -> None:
+        self.fails += 1
+        if self.fails >= self.budget:
+            self.tripped = True
+
+    def check(self) -> None:
+        if self.tripped:
+            raise RuntimeError(
+                f"origin unhealthy: {self.fails} retryable segment failures — "
+                f"{self.diag or 'no diagnostic'} — aborting for fallback"
+            )
+
+
 def build_client(headers: dict | None = None, *, http2: bool = False) -> httpx.AsyncClient:
     """Create an httpx client tuned for high-concurrency segment fetching."""
     return httpx.AsyncClient(
@@ -138,32 +183,64 @@ async def resolve_media_playlist(
     return await resolve_media_playlist(http, chosen, headers, quality, _depth + 1)
 
 
+async def list_master_qualities(
+    http: httpx.AsyncClient, master_url: str, headers: dict
+) -> list[str]:
+    """Resolution heights ('1080','720','480'…) a master playlist actually offers,
+    best-first. Lets a source emit one variant per real quality instead of claiming
+    a single hardcoded resolution. Returns [] if it isn't a readable master."""
+    try:
+        txt = (await http.get(master_url, headers=headers)).text
+    except Exception:  # noqa: BLE001
+        return []
+    if "#EXTM3U" not in txt[:64]:
+        return []
+    heights = {
+        m.group(1)
+        for ln in txt.splitlines() if ln.startswith("#EXT-X-STREAM-INF")
+        for m in [re.search(r"RESOLUTION=\d+x(\d+)", ln)] if m
+    }
+    return sorted(heights, key=int, reverse=True)
+
+
 async def _fetch_segment(
-    http: httpx.AsyncClient, seg_url: str, headers: dict, max_retries: int = 4
+    http: httpx.AsyncClient, seg_url: str, headers: dict, max_retries: int = 4,
+    breaker: _Breaker | None = None,
 ) -> bytes:
     """GET one segment with jittered backoff, honoring 429 Retry-After.
 
     Non-retryable HTTP errors (e.g. 404) raise immediately so a dead segment
     fails the whole stream fast and the caller can fall back to another server,
-    rather than burning the full retry budget on a permanent error.
+    rather than burning the full retry budget on a permanent error. Each
+    retryable hit is also reported to ``breaker`` so a broadly-unhealthy origin
+    trips the circuit and aborts the whole download instead of crawling.
     """
+    if breaker is not None:
+        breaker.check()  # bail immediately if a sibling segment already tripped it
     delay = 0.5
     for attempt in range(max_retries):
         try:
             resp = await http.get(seg_url, headers=headers)
             if resp.status_code in _RETRYABLE:
-                wait = float(resp.headers.get("retry-after", delay))
                 raise httpx.HTTPStatusError("retryable", request=resp.request, response=resp)
             resp.raise_for_status()
             return resp.content
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code if exc.response is not None else 0
+            if status in _RETRYABLE and breaker is not None:
+                breaker.record(exc.response)
+                breaker.hit()
+                breaker.check()  # systemic failure → raise now, don't keep retrying
             if status not in _RETRYABLE or attempt == max_retries - 1:
                 raise
             wait = float(exc.response.headers.get("retry-after", delay)) if exc.response else delay
             await asyncio.sleep(wait + random.uniform(0, 0.4))  # jitter avoids thundering herd
             delay = min(delay * 2, 8.0)
-        except (httpx.TransportError, httpx.TimeoutException):
+        except (httpx.TransportError, httpx.TimeoutException) as exc:
+            if breaker is not None:
+                breaker.record(None, exc)
+                breaker.hit()
+                breaker.check()
             if attempt == max_retries - 1:
                 raise
             await asyncio.sleep(delay + random.uniform(0, 0.4))
@@ -208,19 +285,30 @@ async def download_hls_ts(
 
     sem = asyncio.Semaphore(concurrency)
     done = 0
+    done_bytes = 0
     masked = 0
+    # Abort FAST once retryable failures cross this small budget. A healthy stream
+    # returns 200 on the first try, so it never accumulates these — but a dead/flaky
+    # origin (e.g. Cloudflare 521) trips it within a second or two, which is what
+    # lets the source fall back to the next server instead of grinding for minutes.
+    breaker = _Breaker(min(16, max(6, len(segs) // 25)))
 
     async def grab(i: int, seg_url: str) -> tuple[int, bytes]:
-        nonlocal done, masked
+        nonlocal done, done_bytes, masked
         async with sem:
-            raw = await _fetch_segment(http, seg_url, headers)
+            raw = await _fetch_segment(http, seg_url, headers, breaker=breaker)
             off = ts_start(raw)
             if off > 0:
                 masked += 1
+            chunk = raw[off:]
             done += 1
+            done_bytes += len(chunk)
             if on_progress:
-                await on_progress(done, len(segs))
-            return i, raw[off:]
+                # Report REAL bytes, with total estimated from the running average
+                # segment size, so the UI shows MB/speed instead of a segment count.
+                est_total = int(done_bytes / done * len(segs)) if done else 0
+                await on_progress(done_bytes, est_total)
+            return i, chunk
 
     results = await asyncio.gather(*(grab(i, su) for i, su in enumerate(segs)))
     clean = bytearray()
