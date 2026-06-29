@@ -127,12 +127,12 @@ class AnimeSource(ABC):
         final resume/metadata state (e.g. checksum, bytes written).
         """
 
-    async def coverage(self, query: str) -> SourceCoverage | None:
-        """Cheap per-source summary for ``query`` used by the Website report card.
+    async def coverage(self, *titles: str) -> SourceCoverage | None:
+        """Cheap per-source summary used by the Website report card.
 
-        Sources that can't (or needn't) provide one return ``None``. Website
-        sources override this to report episode totals + sub/dub availability so
-        staff can compare before downloading.
+        Receives candidate titles (AniList English + Romaji); the source verifies
+        a confident match before reporting. Sources that can't (or needn't)
+        provide one return ``None``.
         """
         return None
 

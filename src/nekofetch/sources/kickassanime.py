@@ -334,13 +334,17 @@ class KickAssAnimeSource(AnimeSource):
             page += 1
         return nums
 
-    async def coverage(self, query: str) -> SourceCoverage:
-        """Per-language episode counts — exposes sub/dub variance directly."""
-        stubs = await self.search(query)
-        if not stubs:
-            return SourceCoverage(source=self.name, matched_title=query,
-                                  source_ref="", available=False, note="no match")
-        stub = stubs[0]
+    async def coverage(self, *titles: str) -> SourceCoverage:
+        """Per-language episode counts — exposes sub/dub variance directly.
+
+        Matches by AniList English + Romaji so we never report the wrong show.
+        """
+        from nekofetch.sources._match import find_verified_match
+
+        stub = await find_verified_match(self, list(titles))
+        if not stub:
+            return SourceCoverage(source=self.name, matched_title=titles[0] if titles else "",
+                                  source_ref="", available=False, note="no confident match")
         slug = stub.source_ref.strip("/")
         langs = await self._fetch_languages(slug)
         per_lang: dict[str, set[int]] = {}

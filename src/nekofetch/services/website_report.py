@@ -104,6 +104,8 @@ async def build_website_report(container: Container, *, title: str,
     seasons = franchise.get("franchise_seasons")
     report = WebsiteReport(title=title, anilist_episodes=expected, anilist_seasons=seasons,
                            tree=_ordered_tree(franchise))
+    # Match on BOTH English and Romaji so the site result is provably the same show.
+    titles = [t for t in (franchise.get("english") or title, franchise.get("romaji")) if t]
 
     async def _cov(name: str) -> SourceCoverage:
         try:
@@ -112,7 +114,7 @@ async def build_website_report(container: Container, *, title: str,
             return SourceCoverage(source=name, matched_title=title, source_ref="",
                                   available=False, note="source not active")
         try:
-            cov = await src.coverage(title)
+            cov = await src.coverage(*titles)
             return cov or SourceCoverage(source=name, matched_title=title, source_ref="",
                                          available=False, note="no report")
         except Exception as exc:  # noqa: BLE001

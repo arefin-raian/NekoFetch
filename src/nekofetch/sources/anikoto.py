@@ -244,21 +244,22 @@ class AnikotoSource(AnimeSource):
 
         return episodes
 
-    async def coverage(self, query: str) -> SourceCoverage:
+    async def coverage(self, *titles: str) -> SourceCoverage:
         """Exact episode total + a sampled sub/dub estimate.
 
+        Matches by AniList English + Romaji so seasons/recaps aren't confused.
         AniKoto resolves audio per-episode, so an exact sub/dub split would mean
         probing every episode. Instead we sample a handful spread across the run
         (first / middle / last …) and extrapolate — enough to surface gross
         variance (e.g. dub only on the first few episodes). Marked approximate.
         """
         from nekofetch.domain.enums import AudioType
+        from nekofetch.sources._match import find_verified_match
 
-        stubs = await self.search(query)
-        if not stubs:
-            return SourceCoverage(source=self.name, matched_title=query,
-                                  source_ref="", available=False, note="no match")
-        stub = stubs[0]
+        stub = await find_verified_match(self, list(titles))
+        if not stub:
+            return SourceCoverage(source=self.name, matched_title=titles[0] if titles else "",
+                                  source_ref="", available=False, note="no confident match")
         try:
             eps = await self.get_episodes(stub.source_ref)
         except Exception:

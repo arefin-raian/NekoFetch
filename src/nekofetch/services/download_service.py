@@ -79,9 +79,11 @@ class DownloadWorker:
             job.started_at = _now()
             session.expunge(req)  # detach so we can use it after the session closes
 
-        # Resolve the actual download source + episode list, honoring website
-        # priority chains with fallback (try the preferred site, then the other).
-        source, episodes = await self._resolve_source_and_episodes(req)
+        # Resolve the source chain (preferred site first; both sites for website
+        # requests so dual-audio can cross-source). The primary drives the episode
+        # list and all non-dual downloads.
+        chain = await self._resolve_chain(req)
+        source, episodes = chain[0]
         if req.season is not None:
             episodes = [e for e in episodes if e.season == req.season]
         if req.episodes:
@@ -104,11 +106,11 @@ class DownloadWorker:
                     for v in variants
                 )
                 for audio in audios:
-                    # Dual requested but the source (AniKoto) has no native dual
-                    # track — try to build one from its separate sub+dub streams.
-                    if (audio == AudioType.DUAL_AUDIO and not has_native_dual
-                            and hasattr(source, "dual_audio_plan")):
-                        await self._acquire_dual(source, req, ep, resolution, folder,
+                    # Dual requested but no single native dual track — build the
+                    # best result across the source chain (merge / separate /
+                    # cross-source / sub-only) so both languages are delivered.
+                    if audio == AudioType.DUAL_AUDIO and not has_native_dual:
+                        await self._acquire_dual(chain, req, ep, resolution, folder,
                                                  job_id, cfg)
                         continue
                     variant = _select_variant(
@@ -162,19 +164,25 @@ class DownloadWorker:
 
         await self._complete(job_id)
 
-    async def _resolve_source_and_episodes(self, req):
-        """Resolve a request to a live source + episode list.
+    async def _resolve_chain(self, req) -> list[tuple]:
+        """Resolve a request to a priority-ordered chain of ``(source, episodes)``.
 
         Requests carry an AniList discovery ref (``anilist:<id>``), so we search
-        each candidate source by title to find its native id, then list episodes.
-        Website priority chains (``anikoto>kickassanime``) are tried in order with
-        fallback — the first source that yields episodes wins.
+        each candidate source by verified title (English + Romaji) to find its
+        native id, then list episodes. For a website priority chain
+        (``anikoto>kickassanime``) BOTH sites are resolved when available — that is
+        what lets dual-audio acquisition pull sub from one and dub from the other.
+        Raises ``NotFound`` only when nothing resolves.
         """
         from nekofetch.core.exceptions import NotFound
+        from nekofetch.sources._match import find_verified_match
         from nekofetch.sources.registry import _ALIASES
 
         fr = req.franchise_data or {}
         title = fr.get("english") or fr.get("title") or req.anime_title
+        # Verify against English + Romaji so we never grab the wrong season/title.
+        match_titles = [t for t in (fr.get("english") or req.anime_title,
+                                    fr.get("title"), fr.get("romaji")) if t]
 
         raw = req.source or ""
         if ">" in raw:                          # website priority chain
@@ -186,6 +194,7 @@ class DownloadWorker:
                 names = []
         names = [n for n in names if n and n != "anilist"]
 
+        chain: list[tuple] = []
         last_err: str | None = None
         for name in names:
             try:
@@ -195,63 +204,114 @@ class DownloadWorker:
             try:
                 ref = req.source_ref
                 if not ref or ref.startswith("anilist:"):
-                    stubs = await src.search(title)
-                    if not stubs:
-                        last_err = f"{name}: no match"
+                    stub = await find_verified_match(src, match_titles)
+                    if not stub:
+                        last_err = f"{name}: no confident title match"
                         continue
-                    ref = stubs[0].source_ref
+                    ref = stub.source_ref
                 episodes = await src.get_episodes(ref)
                 if episodes:
                     log.info("download.source.resolved", source=name, episodes=len(episodes))
-                    return src, episodes
-                last_err = f"{name}: no episodes"
+                    chain.append((src, episodes))
+                else:
+                    last_err = f"{name}: no episodes"
             except Exception as exc:  # noqa: BLE001
                 log.warning("download.source.failed", source=name, error=str(exc))
                 last_err = f"{name}: {exc}"
-        raise NotFound(f"no source could provide episodes for {title!r} ({last_err})")
+        if not chain:
+            raise NotFound(f"no source could provide episodes for {title!r} ({last_err})")
+        return chain
 
-    async def _acquire_dual(self, source, req, ep, resolution, folder, job_id, cfg) -> None:
-        """Build a dual-audio result from a sub-only source (AniKoto).
+    async def _best_variant(self, chain, ep_number: int, audio):
+        """First ``(source, variant, ep_ref)`` across the chain that offers ``audio``
+        for ``ep_number`` — this is what enables cross-source acquisition."""
+        for src, eps in chain:
+            match = next((e for e in eps if e.number == ep_number), None)
+            if not match:
+                continue
+            try:
+                variants = await src.get_variants(match.source_ref)
+            except Exception:
+                continue
+            v = next((x for x in variants if x.audio == audio), None)
+            if v is not None:
+                return src, v, match.source_ref
+        return None
 
-        Checks mergeability without downloading the videos. If the sub and dub are
-        the same cut, both are downloaded and remuxed into one dual-audio file;
-        otherwise they're kept as separate sub + dub files (still a valid result).
+    async def _acquire_dual(self, chain, req, ep, resolution, folder, job_id, cfg) -> None:
+        """Deliver BOTH languages for an episode, in the best available shape.
+
+        Strategy, in order of preference:
+          1. sub+dub on the SAME source and the same cut → remux into one dual file;
+          2. sub+dub available (possibly cross-source) → keep as separate files;
+          3. only one audio available → deliver it and flag the gap to staff.
+        The goal is "both languages delivered" — one file or two doesn't matter.
         """
         from nekofetch.sources._dualaudio import merge_dual
+        from nekofetch.sources.base import VideoVariant
 
-        plan = await source.dual_audio_plan(ep.source_ref)
-        if not plan.get("feasible"):
-            return
-        sub_v, dub_v = plan["sub_variant"], plan["dub_variant"]
         base = self._c.env.storage_path / "work" / folder
         base.mkdir(parents=True, exist_ok=True)
         stem = f"S{ep.season:02d}E{ep.number:03d}_{resolution}"
         sub_dest = base / f"{stem}_subbed.mkv"
         dub_dest = base / f"{stem}_dubbed.mkv"
+        a, b, c = cfg.retry_attempts, cfg.retry_backoff_seconds, None  # retry args
 
-        sr = await self._download_with_retry(source, sub_v, sub_dest, None,
-                                             cfg.retry_attempts, cfg.retry_backoff_seconds)
-        dr = await self._download_with_retry(source, dub_v, dub_dest, None,
-                                             cfg.retry_attempts, cfg.retry_backoff_seconds)
+        sub = await self._best_variant(chain, ep.number, AudioType.SUBBED)
+        dub = await self._best_variant(chain, ep.number, AudioType.DUBBED)
 
-        if plan.get("mergeable"):
-            dual_dest = base / f"{stem}_dual_audio.mkv"
-            if await merge_dual(sub_dest, dub_dest, dual_dest):
-                from nekofetch.sources.base import VideoVariant
-                dual_v = VideoVariant(source_ref="", resolution=resolution,
-                                      audio=AudioType.DUAL_AUDIO, container="mkv")
-                size = dual_dest.stat().st_size if dual_dest.exists() else 0
-                await self._record_file(job_id, req, ep, dual_v, dual_dest,
-                                        {"bytes": size})
-                sub_dest.unlink(missing_ok=True)
-                dub_dest.unlink(missing_ok=True)
-                log.info("dualaudio.merged", episode=ep.number, resolution=resolution)
+        # 1) same source + same cut → one merged dual file.
+        if sub and dub and sub[0] is dub[0] and hasattr(sub[0], "dual_audio_plan"):
+            try:
+                plan = await sub[0].dual_audio_plan(sub[2])
+            except Exception:
+                plan = {}
+            if plan.get("mergeable"):
+                sr = await self._download_with_retry(sub[0], sub[1], sub_dest, c, a, b)
+                dr = await self._download_with_retry(dub[0], dub[1], dub_dest, c, a, b)
+                dual_dest = base / f"{stem}_dual_audio.mkv"
+                if await merge_dual(sub_dest, dub_dest, dual_dest):
+                    dual_v = VideoVariant(source_ref="", resolution=resolution,
+                                          audio=AudioType.DUAL_AUDIO, container="mkv")
+                    size = dual_dest.stat().st_size if dual_dest.exists() else 0
+                    await self._record_file(job_id, req, ep, dual_v, dual_dest, {"bytes": size})
+                    sub_dest.unlink(missing_ok=True)
+                    dub_dest.unlink(missing_ok=True)
+                    log.info("dualaudio.merged", episode=ep.number)
+                    return
+                # merge failed → keep the two we already downloaded.
+                await self._record_file(job_id, req, ep, sub[1], sub_dest, sr)
+                await self._record_file(job_id, req, ep, dub[1], dub_dest, dr)
                 return
 
-        # Not the same cut (or merge failed) → keep separate sub + dub.
-        await self._record_file(job_id, req, ep, sub_v, sub_dest, sr)
-        await self._record_file(job_id, req, ep, dub_v, dub_dest, dr)
-        log.info("dualaudio.separate", episode=ep.number, resolution=resolution)
+        # 2/3) download each available audio (cross-source if needed), separately.
+        got_sub = got_dub = False
+        if sub:
+            r = await self._download_with_retry(sub[0], sub[1], sub_dest, c, a, b)
+            await self._record_file(job_id, req, ep, sub[1], sub_dest, r)
+            got_sub = True
+        if dub:
+            r = await self._download_with_retry(dub[0], dub[1], dub_dest, c, a, b)
+            await self._record_file(job_id, req, ep, dub[1], dub_dest, r)
+            got_dub = True
+
+        if got_sub and got_dub:
+            log.info("dualaudio.separate", episode=ep.number,
+                     sub_src=sub[0].name, dub_src=dub[0].name)
+        elif got_sub or got_dub:
+            await self._notify_audio_gap(req, ep, "dub" if got_sub else "sub")
+        else:
+            await self._notify_audio_gap(req, ep, "both")
+
+    async def _notify_audio_gap(self, req, ep, missing: str) -> None:
+        """Flag to staff that an audio track was unavailable so they can decide
+        (accept the partial result, or reassign the source)."""
+        from nekofetch.services.log_channel_service import LogChannelService
+
+        await LogChannelService(self._c).event(
+            "admin", "audio_unavailable", code=req.code, anime=req.anime_title,
+            episode=ep.number, missing=missing,
+        )
 
     def _target_audios(self, req) -> list[AudioType]:
         """Resolve the audio types (subbed/dubbed) to acquire for a request.
