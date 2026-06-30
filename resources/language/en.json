@@ -150,6 +150,7 @@
   "cc_reserved_1": "▢  <b>Reserved For Future Expansion</b>",
   "cc_reserved_2": "▢  <b>Reserved Hold</b>",
   "cc_reserved_3": "▢  <b>Reserved Processing Area</b>",
+  "cc_inbox_idle": "📭 <b>Request inbox</b>\n<i>No pending requests right now.</i>",
   "cc_request_card_title": "📥 <b>New request</b>  ·  #{code}",
   "cc_request_card_body": "<b>{title}</b>\n<b>Requested by</b> <code>{by}</code> ❘ <b>Scope :</b> {scope}",
   "cc_request_choose_source": "Assign a source:",

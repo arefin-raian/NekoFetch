@@ -701,58 +701,129 @@ class DownloadWorker:
             )
 
     async def _complete(self, job_id: int) -> None:
+        """The download finished — but the JOB is not 'complete' until processing AND
+        the database (storage) upload are done. The job is kept RUNNING through both
+        so every stage is visible in ACTIVE TASKS, and only flipped to COMPLETED at
+        the very end (after the storage upload)."""
         async with session_scope(self._c.pg_sessionmaker) as session:
             job = await session.get(DownloadJob, job_id)
-            job.status = JobStatus.COMPLETED
-            job.progress = 100.0
-            job.finished_at = _now()
-            req = await RequestRepository(session).get(job.request_id)
-            if req:
+            if job is not None:
+                job.progress = 100.0
+            req = await RequestRepository(session).get(job.request_id) if job else None
+            if req is not None:
                 req.status = RequestStatus.PROCESSING
-                user_id = req.user_id
-                title = req.anime_title
-                code = req.code
-                needs_approval = self._c.config.processing.require_approval_before_publish
-            else:
-                user_id = None
-                title = ""
-                code = ""
-                needs_approval = False
-        log.info("download.job.complete", job_id=job_id)
-        if user_id:
-            from nekofetch.services.notification_service import NotificationService
-            await NotificationService(self._c).download_complete(user_id, title, code)
-        from nekofetch.services.log_channel_service import LogChannelService
+            user_id = req.user_id if req else None
+            title = req.anime_title if req else ""
+            code = req.code if req else ""
+        needs_approval = self._c.config.processing.require_approval_before_publish
+        log.info("download.job.downloaded", job_id=job_id)
 
-        await LogChannelService(self._c).event(
-            "download", "complete", job=job_id, anime=title, code=code
-        )
+        from nekofetch.services.log_channel_service import LogChannelService
+        from nekofetch.services.notification_service import NotificationService
+
+        if user_id:
+            await NotificationService(self._c).download_complete(user_id, title, code)
+        # "downloaded" (not "complete") — the job isn't complete until processing +
+        # DB upload finish. Only the final step emits the ✅ complete line.
+        await LogChannelService(self._c).event("download", "downloaded", job=job_id,
+                                               anime=title, code=code)
+
         from nekofetch.services.processing.pipeline import ProcessingPipeline
 
         try:
-            pipeline = ProcessingPipeline(self._c)
-            # Log each stage as it runs
-            ctx = await pipeline.run_for_job(job_id)
-            await LogChannelService(self._c).event(
-                "processing", "complete", job=job_id, anime=title, notes=len(ctx.notes),
-                stages=",".join(ctx.notes) if ctx.notes else None,
-            )
-            # Auto-upload the verified packs to the storage (database) channel — this
-            # is part of the pipeline, NOT the separate main-channel "publish".
+            ctx = await ProcessingPipeline(self._c).run_for_job(job_id)
+            # Upload the verified packs to the storage (DB) channel WITH live progress —
+            # this is part of being done, not an afterthought, and only NOW (after a
+            # successful upload) is the job genuinely complete.
             if code:
                 from nekofetch.services.publishing_service import PublishingService
-                await PublishingService(self._c).upload_to_storage(code)
+
+                await self._push_stage(job_id, title, "Uploading", 0.0)
+                await LogChannelService(self._c).event("processing", "uploading",
+                                                       job=job_id, anime=title)
+                await PublishingService(self._c).upload_to_storage(
+                    code, on_progress=self._upload_progress(job_id, title),
+                )
+            await LogChannelService(self._c).event("processing", "complete", job=job_id,
+                                                   anime=title, notes=len(ctx.notes))
+            await self._finalize_complete(job_id)
             if user_id:
-                from nekofetch.services.notification_service import NotificationService
-                await NotificationService(self._c).processing_complete(user_id, title, code, needs_approval=needs_approval)
-        except Exception as exc:
+                await NotificationService(self._c).processing_complete(
+                    user_id, title, code, needs_approval=needs_approval)
+        except Exception as exc:  # noqa: BLE001
             log.error("download.processing.failed", job_id=job_id, error=str(exc))
             logcc = LogChannelService(self._c)
             await logcc.event("error", "processing_failed", job=job_id, error=str(exc))
             await logcc.post_failure_card(code=code, title=title, stage="processing", error=str(exc))
+            await self._mark_failed(job_id, str(exc))
             if user_id:
-                from nekofetch.services.notification_service import NotificationService
                 await NotificationService(self._c).processing_failed(user_id, title, code, str(exc))
+
+    async def _finalize_complete(self, job_id: int) -> None:
+        """Mark the job COMPLETED only after download + processing + DB upload — and
+        clear its live progress so it leaves ACTIVE TASKS."""
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            job = await session.get(DownloadJob, job_id)
+            if job is not None:
+                job.status = JobStatus.COMPLETED
+                job.progress = 100.0
+                job.finished_at = _now()
+        if self._c.progress:
+            try:
+                await self._c.progress.delete(job_id)
+            except Exception:  # noqa: BLE001
+                pass
+        log.info("download.job.complete", job_id=job_id)
+
+    async def _mark_failed(self, job_id: int, error: str) -> None:
+        async with session_scope(self._c.pg_sessionmaker) as session:
+            job = await session.get(DownloadJob, job_id)
+            if job is not None:
+                job.status = JobStatus.FAILED
+                job.error = error[:500]
+        if self._c.progress:
+            try:
+                await self._c.progress.delete(job_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _push_stage(self, job_id: int, title: str, stage: str, pct: float) -> None:
+        """Publish a coarse stage marker so ACTIVE TASKS shows post-download stages
+        (Verifying / Metadata / Uploading …) with a bar, not just downloads."""
+        if not self._c.progress:
+            return
+        try:
+            await self._c.progress.set(ProgressSnapshot(
+                job_id=job_id, status=JobStatus.RUNNING.value, progress=pct,
+                stage=stage, label=title,
+            ))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _upload_progress(self, job_id: int, title: str):
+        """Rolling-window progress callback for the storage upload — same speed/ETA
+        treatment as downloads, tagged with the 'Uploading' stage."""
+        st = {"last": 0.0, "win_t": time.monotonic(), "win_done": 0}
+
+        async def on_progress(done: int, total: int) -> None:
+            now = time.monotonic()
+            if now - st["last"] < 0.5:
+                return
+            dt = max(now - st["win_t"], 1e-6)
+            speed = max(done - st["win_done"], 0) / dt
+            st["win_t"], st["win_done"], st["last"] = now, done, now
+            pct = (done / total * 100) if total else 0.0
+            eta = int((total - done) / speed) if speed > 0 else None
+            if self._c.progress:
+                try:
+                    await self._c.progress.set(ProgressSnapshot(
+                        job_id=job_id, status=JobStatus.RUNNING.value, progress=pct,
+                        speed_bps=speed, downloaded_bytes=done, total_bytes=total,
+                        eta_seconds=eta, stage="Uploading", label=title,
+                    ))
+                except Exception:  # noqa: BLE001
+                    pass
+        return on_progress
 
     async def _handle_failure(self, job_id: int, exc: Exception) -> None:
         async with session_scope(self._c.pg_sessionmaker) as session:

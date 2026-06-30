@@ -128,11 +128,14 @@ class StorageChannelService:
         episode_from: int | None = None,
         episode_to: int | None = None,
         thumb: Path | None = None,
+        on_progress=None,
     ) -> StoragePack:
         """Post header, upload files in order, post the end sticker; record the range.
 
         ``thumb`` (when present) is the request's poster, attached to every document
-        so the files show a proper cover in Telegram instead of a blank icon."""
+        so the files show a proper cover in Telegram instead of a blank icon.
+        ``on_progress(done, total)`` (when present) receives live upload byte counts
+        for the whole pack, so ACTIVE TASKS can render an upload bar + speed."""
         client = self._client
         channel_id = self.cfg.channel_id
         thumb_arg = str(thumb) if thumb and thumb.exists() else None
@@ -142,9 +145,25 @@ class StorageChannelService:
             self.header_text(title=title, season=key.season, resolution=key.resolution,
                              audio=key.audio, episode_from=episode_from, episode_to=episode_to),
         )
+        # Upload byte accounting across the whole pack so the progress bar reflects
+        # the pack, not each individual file resetting to 0.
+        sizes = [p.stat().st_size if p.exists() else 0 for p in file_paths]
+        pack_total = sum(sizes)
+        uploaded_before = 0
+
         file_ids: list[int] = []
-        for path in file_paths:
-            sent = await client.send_document(channel_id, str(path), thumb=thumb_arg)
+        for idx, path in enumerate(file_paths):
+            prog_cb = None
+            if on_progress is not None:
+                base = uploaded_before
+
+                async def prog_cb(current, total, _base=base):  # noqa: ANN001
+                    await on_progress(_base + current, pack_total)
+
+            sent = await client.send_document(
+                channel_id, str(path), thumb=thumb_arg, progress=prog_cb,
+            )
+            uploaded_before += sizes[idx]
             file_ids.append(sent.id)
 
         end_id = file_ids[-1] if file_ids else header.id

@@ -198,9 +198,22 @@ def notices_section(lines: list[str], ts: str) -> str:
 
 def notice_line(category: str, action: str, ts: str, fields: dict | None = None) -> str:
     """One activity-stream line: emoji + human label + the single most relevant
-    field, with a muted timestamp. Reads like English, not a log dump."""
+    field, with a muted timestamp. Reads like English, not a log dump.
+
+    Pipeline stages (``processing`` / ``download`` actions) get a per-STAGE glyph so
+    Verify/Metadata/Branding/Thumbnail/Store/Upload/Complete are visually distinct,
+    instead of every step sharing one gear."""
     fields = fields or {}
-    emoji = t(M.LOG_EMOJI.get(category, "log_emoji_system"))
+    # A distinct glyph per pipeline stage where one applies; otherwise the category
+    # emoji. Only processing.complete (download + processing + DB upload all done) is
+    # the true end-of-everything marker → ✅.
+    if category == "processing" and action == "complete":
+        emoji = "✅"
+    elif category in ("processing", "download"):
+        glyph = _stage_glyph(action)
+        emoji = glyph if glyph != "⚙️" else t(M.LOG_EMOJI.get(category, "log_emoji_system"))
+    else:
+        emoji = t(M.LOG_EMOJI.get(category, "log_emoji_system"))
     label_key = _NOTICE_LABEL.get(f"{category}.{action}")
     label = t(label_key) if label_key else action.replace("_", " ").title()
     primary = ""
@@ -228,6 +241,12 @@ _RESERVED_KEYS = (M.CC_RESERVED_1, M.CC_RESERVED_2, M.CC_RESERVED_3)
 
 def reserved_placeholder(index: int = 0) -> str:
     return t(_RESERVED_KEYS[index % len(_RESERVED_KEYS)])
+
+
+def inbox_idle() -> str:
+    """The persistent request-inbox in its idle state — a single, stable status
+    line shown when no request is awaiting source assignment."""
+    return t(M.CC_INBOX_IDLE)
 
 
 def request_card(code: str, title: str, by: str, scope: str) -> str:

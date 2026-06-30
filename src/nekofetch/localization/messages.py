@@ -229,6 +229,7 @@ class M:
     CC_RESERVED_1 = "cc_reserved_1"
     CC_RESERVED_2 = "cc_reserved_2"
     CC_RESERVED_3 = "cc_reserved_3"
+    CC_INBOX_IDLE = "cc_inbox_idle"
     CC_REQUEST_CARD_TITLE = "cc_request_card_title"
     CC_REQUEST_CARD_BODY = "cc_request_card_body"
     CC_REQUEST_CHOOSE_SOURCE = "cc_request_choose_source"

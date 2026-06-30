@@ -31,14 +31,24 @@ def now() -> datetime:
     return datetime.now(DISPLAY_TZ)
 
 
-def now_label(fmt: str = "%H:%M:%S %Z") -> str:
-    """Short 'now' label for live UI (e.g. '13:45:09 +06')."""
+def offset_label() -> str:
+    """The display timezone as a clean human label, e.g. 'UTC+6' (not '+06')."""
+    off = now().utcoffset() or timedelta(0)
+    total_min = int(off.total_seconds() // 60)
+    sign = "+" if total_min >= 0 else "-"
+    h, m = divmod(abs(total_min), 60)
+    return f"UTC{sign}{h}" + (f":{m:02d}" if m else "")
+
+
+def now_label(fmt: str = "%H:%M:%S") -> str:
+    """Short, CLEAN 'now' label for live UI (e.g. '13:45:09') — no timezone offset,
+    which keeps the activity stream and section headers uncluttered."""
     return now().strftime(fmt)
 
 
-def to_display(dt: datetime, fmt: str = "%Y-%m-%d %H:%M %Z") -> str:
-    """Render a (possibly UTC) datetime in the display timezone. Naive datetimes
-    are assumed to be UTC."""
+def to_display(dt: datetime, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Render a (possibly UTC) datetime in the display timezone with an explicit,
+    readable zone label ('UTC+6'). Naive datetimes are assumed to be UTC."""
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(DISPLAY_TZ).strftime(fmt)
+    return dt.astimezone(DISPLAY_TZ).strftime(fmt) + f" {offset_label()}"

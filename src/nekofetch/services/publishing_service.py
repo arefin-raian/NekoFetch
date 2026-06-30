@@ -72,7 +72,7 @@ class PublishingService:
             .all()
         )
 
-    async def upload_to_storage(self, code: str) -> int:
+    async def upload_to_storage(self, code: str, *, on_progress=None) -> int:
         """Upload a request's processed files to the storage (DB) channel as packs.
 
         This is **automatic** — it runs straight after processing, independent of
@@ -80,13 +80,23 @@ class PublishingService:
         database channel is just part of the pipeline; "publishing" (posting to the
         main channel, index, etc.) is a separate, deliberate action.
         """
+        from pathlib import Path
+
+        verify_on = self._c.config.processing.verify_files
         async with session_scope(self._c.pg_sessionmaker) as session:
             req = await RequestRepository(session).get_by_code(code)
             if req is None:
                 raise NotFound(code)
             files = await self._files_for_request(session, req.id)
-            # Only upload files that passed verification — never push corrupt media.
-            files = [f for f in files if f.local_path and f.verified]
+            # Upload every file that exists on disk. The verify GATE only applies when
+            # verification is actually enabled — otherwise files are never flagged
+            # verified and NOTHING would ever reach the DB channel (the bug where DB
+            # uploads "didn't consistently happen").
+            files = [
+                f for f in files
+                if f.local_path and Path(f.local_path).exists()
+                and (f.verified or not verify_on)
+            ]
             anime_doc_id = req.anime_doc_id or req.source_ref
             title = req.anime_title
             snapshot = [
@@ -95,7 +105,7 @@ class PublishingService:
                 for f in files
             ]
 
-        await self._upload_packs(anime_doc_id, title, snapshot)
+        await self._upload_packs(anime_doc_id, title, snapshot, on_progress=on_progress)
 
         from nekofetch.services.log_channel_service import LogChannelService
 
@@ -152,7 +162,8 @@ class PublishingService:
             await NotificationService(self._c).request_published(user_id, title, code)
         return count
 
-    async def _upload_packs(self, anime_doc_id: str, title: str, files: list[dict]) -> None:
+    async def _upload_packs(self, anime_doc_id: str, title: str, files: list[dict],
+                            *, on_progress=None) -> None:
         """Group published files by (season, resolution, audio) and upload each as a pack."""
         if not self._c.config.storage_channel.enabled or not files:
             return
@@ -173,8 +184,14 @@ class PublishingService:
                 continue
             items.sort(key=lambda x: (x["episode"] or 0))
             episodes = [i["episode"] for i in items if i["episode"] is not None]
-            # The poster the thumbnail stage wrote sits beside the media files.
-            poster = Path(items[0]["path"]).with_name(POSTER_THUMB_NAME)
+            # Find the poster the thumbnail stage wrote — it's a sibling of the media
+            # files. Search each item's folder so EVERY pack gets the thumbnail even
+            # if the first item happens to live elsewhere.
+            poster = next(
+                (p for i in items
+                 if (p := Path(i["path"]).with_name(POSTER_THUMB_NAME)).exists()),
+                None,
+            )
             try:
                 await storage.upload_pack(
                     storage.key_from(anime_doc_id, season, resolution, audio),
@@ -182,7 +199,8 @@ class PublishingService:
                     file_paths=[Path(i["path"]) for i in items],
                     episode_from=min(episodes) if episodes else None,
                     episode_to=max(episodes) if episodes else None,
-                    thumb=poster if poster.exists() else None,
+                    thumb=poster,
+                    on_progress=on_progress,
                 )
             except FeatureDisabled:
                 return

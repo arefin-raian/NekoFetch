@@ -113,7 +113,7 @@ log_channel:
   pinned_catalog: true          # published catalog index (edited in place)
   refresh_seconds: 60
   events: [all]                 # 'all' = everything; or a subset of categories
-  cover_image: "https://x02.me/i/W3GA9E.png"   # cover photo atop the control center
+  cover_image: "https://files.catbox.moe/how89x.jpg"   # cover photo atop the control center
   discussion_ttl_minutes: 5     # idle human chatter auto-deletes after N minutes
 
 # Access: free trial, then renew via a shortlink token.

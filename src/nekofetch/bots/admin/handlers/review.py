@@ -113,12 +113,11 @@ def register(client: Client, container: Container) -> None:
         parts = q.data.split("|", 3)
         code, chosen_source = parts[2], parts[3]
 
-        # The request card is being consumed: lock its buttons against a double-tap.
-        # KEEP the divider — it becomes the separator in front of the follow-up
-        # fetched card, so the layout stays Border → Card and the fetched card is
-        # never left without a divider above it.
+        # This request is being assigned: lock the buttons against a double-tap and
+        # mark it 'handling' so the persistent inbox advances to the next pending
+        # request (or idle) within seconds instead of re-showing this one.
         await lock_buttons(q)
-        await LogChannelService(container).clear_request_markers(code, delete_divider=False)
+        await LogChannelService(container).mark_handling(code)
 
         if chosen_source == "telegram":
             await q.answer()
@@ -508,8 +507,9 @@ def register(client: Client, container: Container) -> None:
         except NekoFetchError as exc:
             await q.answer(getattr(exc, "detail", None) or L(M.ERR_GENERIC), show_alert=True)
             return
-        # Card consumed → remove its leading divider so no orphan sticker is left.
-        await LogChannelService(container).clear_request_markers(code)
+        # Rejected → it leaves the pending queue; clear any handling flag so the
+        # persistent inbox refreshes to the next request (or idle).
+        await LogChannelService(container).clear_handling(code)
         await q.answer(L(M.TOAST_REJECTED))
         await _render_list(q, 0)
 

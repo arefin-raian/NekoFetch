@@ -43,6 +43,7 @@ _K_DISCUSSION = "nf:logcc:discussion"  # {ids: [...], last: epoch} — temp huma
 _K_REQ_MARKERS = "nf:logcc:reqmarkers"  # {code: {divider, card}} — per-request card+divider ids
 _K_SIGNED = "nf:logcc:signed"          # set once the channel's "Sign Messages" is enabled
 _K_STUCK = "nf:stuck:{code}"           # per-request stuck-episode state for the attention card
+_K_HANDLING = "nf:logcc:handling:{code}"  # a request currently being assigned (drops off the inbox)
 
 
 def _sec_key(name: str) -> str:
@@ -212,6 +213,11 @@ class LogChannelService:
         """
         extras: list[int] = []  # cover/intro, dividers — everything but sections
 
+        # Post the whole structured layout UNSIGNED — bot-managed system messages
+        # shouldn't carry an author signature (it just clutters them). Sign Messages
+        # is restored at the end so human staff chatter is attributed normally.
+        await self._set_signatures(False)
+
         # Cover + description as a single message: the intro rides as the photo's
         # caption when a cover image is configured, else it's plain text.
         intro_text = t(M.CC_INTRO)
@@ -246,6 +252,11 @@ class LogChannelService:
 
         await self._c.redis.set(_K_STICKERS, json.dumps(extras))
         await self._c.redis.set(_K_CHANNEL, self.cfg.channel_id)
+        # All sections posted — restore Sign Messages so staff conversation is
+        # attributed again (and keep the flag consistent for ensure_signatures()).
+        await self._set_signatures(True)
+        if self._c.redis:
+            await self._c.redis.set(_K_SIGNED, "1")
 
     async def _post_divider(self) -> int | None:
         if not self.cfg.divider_sticker_id:
@@ -327,6 +338,9 @@ class LogChannelService:
             await self._edit_or_resend("active", text, reply_markup=self._active_keyboard(qrows))
         except Exception as exc:
             log.debug("logcc.refresh_active.failed", error=str(exc))
+        # Keep the persistent request inbox current on the fast lane too, so it
+        # re-appears within seconds after a card is consumed by source assignment.
+        await self.refresh_inbox()
 
     @staticmethod
     def _active_row_dict(r) -> dict:
@@ -436,28 +450,61 @@ class LogChannelService:
 
     # ── control-center cards (standalone messages with actions) ─────────────────
     async def post_request_card(self, *, code: str, title: str, by: str, scope: str) -> None:
-        """Post a new request with source-selection buttons (admins act inline)."""
+        """A new request arrived — refresh the single persistent request inbox rather
+        than posting a fresh card per request (the request is already in the DB)."""
+        await self.refresh_inbox()
+
+    # ── request being actively assigned (so it drops off the inbox head) ─────────
+    async def mark_handling(self, code: str) -> None:
+        if self._c.redis:
+            await self._c.redis.set(_K_HANDLING.format(code=code), "1", ex=3600)
+        await self.refresh_inbox()
+
+    async def clear_handling(self, code: str) -> None:
+        if self._c.redis:
+            await self._c.redis.delete(_K_HANDLING.format(code=code))
+        await self.refresh_inbox()
+
+    async def _is_handling(self, code: str) -> bool:
+        return bool(self._c.redis and await self._c.redis.get(_K_HANDLING.format(code=code)))
+
+    async def refresh_inbox(self) -> None:
+        """Maintain ONE persistent request-inbox message at the foot of the channel.
+
+        It shows the oldest UNASSIGNED request as an actionable source-selection card,
+        or a clean 'no pending requests' status when the queue is empty — edited in
+        place, never a new message per request. A request being actively assigned is
+        skipped (so the inbox advances to the next), and the rest stay visible in the
+        PENDING section.
+        """
         if not self._active():
             return
-        def _btn(key: str, *parts: str) -> InlineKeyboardButton:
-            return InlineKeyboardButton(t(key), callback_data=cb(*parts))
-
-        kb = InlineKeyboardMarkup([
-            [_btn(M.ADMIN_BTN_TELEGRAM, "staff", "rsource", code, "telegram"),
-             _btn(M.ADMIN_BTN_WEBSITE, "staff", "rsource", code, "website"),
-             _btn(M.ADMIN_BTN_TORRENT, "staff", "rsource", code, "torrent")],
-            [_btn(M.ADMIN_BTN_REJECT, "staff", "rreject", code)],
-        ])
         try:
-            # Divider FIRST, then the card: Border → Card → Border → Card. The pair
-            # is tracked so that when the card is consumed (source assigned/rejected)
-            # both it and its divider are removed together — no orphan stickers.
-            divider_id = await self._post_divider()
-            card = await self._send(S.request_card(code, title, by, scope), reply_markup=kb)
-            await self._remember_request_markers(code, divider_id, card.id)
-            await self._c.redis.set(_K_LAST_BOT, "1")  # next human msg gets a divider
-        except Exception as exc:
-            log.warning("logcc.request_card.failed", error=str(exc))
+            from nekofetch.services.request_service import RequestService
+
+            pending = await RequestService(self._c).list_pending(limit=20)
+            head = None
+            for r in pending:
+                if not await self._is_handling(r.code):
+                    head = r
+                    break
+            if head is not None:
+                def _btn(key: str, *parts: str) -> InlineKeyboardButton:
+                    return InlineKeyboardButton(t(key), callback_data=cb(*parts))
+
+                kb = InlineKeyboardMarkup([
+                    [_btn(M.ADMIN_BTN_TELEGRAM, "staff", "rsource", head.code, "telegram"),
+                     _btn(M.ADMIN_BTN_WEBSITE, "staff", "rsource", head.code, "website"),
+                     _btn(M.ADMIN_BTN_TORRENT, "staff", "rsource", head.code, "torrent")],
+                    [_btn(M.ADMIN_BTN_REJECT, "staff", "rreject", head.code)],
+                ])
+                text = S.request_card(head.code, head.anime_title,
+                                      str(head.user_id), str(getattr(head, "scope", "") or ""))
+                await self._edit_or_resend("inbox", text, reply_markup=kb)
+            else:
+                await self._edit_or_resend("inbox", S.inbox_idle(), reply_markup=None)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("logcc.inbox.failed", error=str(exc))
 
     async def _remember_request_markers(
         self, code: str, divider_id: int | None, card_id: int
@@ -545,21 +592,29 @@ class LogChannelService:
             log.warning("logcc.failure_card.failed", error=str(exc))
 
     # ── human discussion: keep staff chatter out of the bot-managed flow ─────────
-    async def ensure_signatures(self) -> None:
-        """Enable the channel's 'Sign Messages' setting, once, so human posts carry
-        an author signature we can attribute by name. Best-effort and idempotent —
-        the attempt is recorded either way so a failure doesn't retry every message."""
-        if not (self._active() and self._c.redis):
-            return
-        if await self._c.redis.get(_K_SIGNED):
+    async def _set_signatures(self, enabled: bool) -> None:
+        """Toggle the channel's 'Sign Messages' setting (best-effort)."""
+        if not self._active():
             return
         try:
             from pyrogram.raw.functions.channels import ToggleSignatures
 
             peer = await self._client.resolve_peer(self.cfg.channel_id)
-            await self._client.invoke(ToggleSignatures(channel=peer, signatures_enabled=True))
-        except Exception as exc:
-            log.debug("logcc.signatures.failed", error=str(exc))
+            await self._client.invoke(
+                ToggleSignatures(channel=peer, signatures_enabled=enabled)
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.debug("logcc.signatures.toggle.failed", enabled=enabled, error=str(exc))
+
+    async def ensure_signatures(self) -> None:
+        """Enable 'Sign Messages' once, so human posts carry an author signature we
+        can attribute by name. Best-effort and idempotent — recorded either way so a
+        failure doesn't retry every message."""
+        if not (self._active() and self._c.redis):
+            return
+        if await self._c.redis.get(_K_SIGNED):
+            return
+        await self._set_signatures(True)
         await self._c.redis.set(_K_SIGNED, "1")
 
     @staticmethod
