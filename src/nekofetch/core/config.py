@@ -284,15 +284,15 @@ class MainChannelConfig(BaseModel):
     channel_id: int = 0
     # Variables: {title} {tag} {episodes} {qualities} {languages} {genres} {overview}
     caption_template: str = (
-        "{title} 『 #{tag} 』\n\n"
-        "⌬ EPISODES : {episodes}\n"
-        "⌬ QUALITY : {qualities}\n"
-        "⌬ LANGUAGE : {languages}\n"
-        "⌬ GENRE : {genres}\n\n"
-        "‣ OverView : {overview}"
+        "<blockquote><b>{title}『 #{tag} 』</b></blockquote>\n\n"
+        "<b>⌬ EPISODES :</b> {episodes}\n"
+        "<b>⌬ QUALITY :</b> {qualities}\n"
+        "<b>⌬ LANGUAGE :</b> {languages}\n"
+        "<b>⌬ GENRE :</b> {genres}\n\n"
+        "<blockquote><b>‣ OverView :</b> {overview}</blockquote>"
     )
-    index_button_text: str = "Index"
-    download_button_text: str = "Download"
+    index_button_text: str = "ɪɴᴅᴇx"
+    download_button_text: str = "ᴅᴏᴡɴʟᴏᴀᴅ"
 
 
 class IndexChannelConfig(BaseModel):
@@ -326,6 +326,15 @@ class LocalizationConfig(BaseModel):
     directory: str = "resources/language"
 
 
+class BotConfig(BaseModel):
+    """Distribution-bot creation and content configuration."""
+
+    auto_create_on_publish: bool = True
+    health_check_interval_minutes: int = 60
+    delivery_retention_days: int = 7
+    avatar_source: str = "tmdb"  # "tmdb" | "anilist"
+
+
 class AppConfig(BaseModel):
     """Typed view of config.yaml. Every section is optional with sane defaults."""
 
@@ -350,6 +359,7 @@ class AppConfig(BaseModel):
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     localization: LocalizationConfig = Field(default_factory=LocalizationConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    bot: BotConfig = Field(default_factory=BotConfig)
 
     @classmethod
     def load(cls, path: str | Path = "config.yaml") -> "AppConfig":

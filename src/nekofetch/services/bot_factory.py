@@ -58,7 +58,7 @@ class BotFactory:
         return self._pool
 
     # ── public entry ─────────────────────────────────────────────────────────────
-    async def create_for_anime(self, anime_doc_id: str) -> "object":
+    async def create_for_anime(self, anime_doc_id: str) -> "BotInfo":
         """Create + configure a distribution bot for a published title, then register
         it. Returns the BotInfo from BotManagementService."""
         if not self._c.config.features.distribution_bots:
@@ -82,7 +82,7 @@ class BotFactory:
             except OSError:
                 pass
 
-        from nekofetch.services.bot_management_service import BotManagementService
+        from nekofetch.services.bot_management_service import BotManagementService, BotInfo
 
         return await BotManagementService(self._c).register(
             token, name=name, anime_doc_id=anime_doc_id,

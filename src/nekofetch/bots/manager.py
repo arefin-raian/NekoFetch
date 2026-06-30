@@ -50,6 +50,80 @@ class BotManager:
 
         await self._start_background_workers()
 
+        # Start ban-detection health check.
+        self._start_ban_health_check()
+
+    async def _check_bots_for_bans(self) -> None:
+        """Periodic health check — detect banned bots and auto-recreate them."""
+        interval = self._c.config.bot.health_check_interval_minutes
+        if interval <= 0:
+            return
+
+        from sqlalchemy import select
+
+        from nekofetch.infrastructure.database.postgres.models import DistributionBot
+        from nekofetch.infrastructure.database.postgres.session import session_scope
+
+        while True:
+            await asyncio.sleep(interval * 60)
+            log.debug("bots.health_check.start")
+
+            # Check each running distribution client.
+            for bot_id, client in list(self._distribution.items()):
+                try:
+                    me = await client.get_me()
+                    if me is not None:
+                        continue  # Bot is fine.
+                except Exception:  # noqa: BLE001
+                    pass
+
+                # Bot appears to be banned — mark it and recreate.
+                log.warning("bots.health_check.banned", bot_id=bot_id)
+                anime_doc_id: str | None = None
+                async with session_scope(self._c.pg_sessionmaker) as session:
+                    row = await session.get(DistributionBot, bot_id)
+                    if row is not None:
+                        anime_doc_id = row.anime_doc_id
+                        row.enabled = False
+
+                # Stop the banned client.
+                try:
+                    await client.stop()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._distribution.pop(bot_id, None)
+
+                # Auto-recreate if we have the anime_doc_id.
+                if anime_doc_id:
+                    log.info("bots.health_check.recreating", anime=anime_doc_id)
+                    await self._alert_admin(
+                        f"♻️ <b>distribution bot banned!</b>\n\n"
+                        f"<b>bot id:</b> <code>{bot_id}</code>\n"
+                        f"<b>anime:</b> {anime_doc_id}\n\n"
+                        f"auto-recreate in progress…"
+                    )
+                    from nekofetch.services.bot_orchestrator import BotOrchestratorService
+
+                    try:
+                        await BotOrchestratorService(self._c).recreate_bot(anime_doc_id)
+                        log.info("bots.health_check.recreated", anime=anime_doc_id)
+                        await self._alert_admin(f"✅ <b>bot recreated</b> for {anime_doc_id}")
+                    except Exception as exc:  # noqa: BLE001
+                        log.error("bots.health_check.recreate.failed", anime=anime_doc_id, error=str(exc))
+                        await self._alert_admin(
+                            f"⚠️ <b>bot recreate failed!</b>\n\n"
+                            f"<b>anime:</b> {anime_doc_id}\n"
+                            f"<b>error:</b> {str(exc)[:200]}"
+                        )
+
+    def _start_ban_health_check(self) -> None:
+        """Start the background health-check task."""
+        interval = self._c.config.bot.health_check_interval_minutes
+        if interval > 0:
+            task = asyncio.create_task(self._check_bots_for_bans())
+            self._c._ban_health_task = task  # type: ignore[attr-defined]
+            log.info("bots.health_check.started", interval_minutes=interval)
+
     async def _alert_admin(self, text: str) -> None:
         owner_id = self._c.config.security.owner_id
         if not owner_id or not self._admin:
@@ -155,6 +229,7 @@ class BotManager:
         # Scheduled maintenance jobs.
         self._scheduler = Scheduler()
         self._c.scheduler = self._scheduler  # type: ignore[attr-defined]
+        self._ban_health_task: asyncio.Task | None = None
         dist = DistributionService(self._c)
         if self._c.config.features.temporary_links:
             self._scheduler.every(60, dist.sweep_expired, id="link-expiry-sweep")
@@ -175,6 +250,13 @@ class BotManager:
             )
 
         self._scheduler.start()
+
+    def _start_ban_health_check(self) -> None:
+        """Start the background ban-detection health check."""
+        interval = self._c.config.bot.health_check_interval_minutes
+        if interval > 0:
+            self._ban_health_task = asyncio.create_task(self._check_bots_for_bans())
+            log.info("bots.health_check.started", interval_minutes=interval)
 
     async def _load_distribution_bots(self) -> None:
         from sqlalchemy import select
@@ -235,6 +317,9 @@ class BotManager:
             await self._worker.stop()
         if self._worker_task is not None:
             self._worker_task.cancel()
+        # Cancel the ban health check task.
+        if self._ban_health_task is not None and not self._ban_health_task.done():
+            self._ban_health_task.cancel()
         for client in self._distribution.values():
             try:
                 await client.stop()

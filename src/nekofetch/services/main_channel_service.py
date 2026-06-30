@@ -49,6 +49,7 @@ class PublicationFacts:
     genres: str = "—"
     overview: str = "—"
     poster_url: str | None = None
+    backdrop_url: str | None = None   # TMDB English 16:9 backdrop for the post photo
     bot_username: str | None = None
     _audios: set = field(default_factory=set)
 
@@ -107,6 +108,22 @@ class MainChannelService:
             facts.poster_url = data.header_image or facts.poster_url
             if data.episode_count and facts.episodes == "—":
                 facts.episodes = str(data.episode_count)
+
+        # Fetch TMDB metadata for the post photo + overview (best-effort).
+        # TMDB descriptions cover the entire franchise, not a single season.
+        try:
+            tmdb = getattr(self._c, "tmdb", None)
+            if tmdb is not None:
+                result = await tmdb.search(facts.title)
+                if result is not None:
+                    if not facts.backdrop_url and result.backdrop_url:
+                        facts.backdrop_url = result.backdrop_url
+                    # TMDB overview covers the whole franchise — better for main channel
+                    if result.overview and result.overview != "—":
+                        facts.overview = result.overview
+        except Exception as exc:  # noqa: BLE001
+            log.debug("mainchannel.tmdb.failed", title=facts.title, error=str(exc))
+
         return facts
 
     def _caption(self, f: PublicationFacts) -> str:
@@ -145,15 +162,18 @@ class MainChannelService:
             ).scalar_one_or_none()
             existing_id = post.main_message_id if post else None
 
+        # Use the TMDB English backdrop as the post photo; fall back to poster.
+        photo_url = facts.backdrop_url or facts.poster_url
+
         try:
             if existing_id:
                 await client.edit_message_caption(
                     self.cfg.channel_id, existing_id, caption=caption, reply_markup=markup
                 )
                 message_id = existing_id
-            elif facts.poster_url:
+            elif photo_url:
                 sent = await client.send_photo(
-                    self.cfg.channel_id, facts.poster_url, caption=caption, reply_markup=markup
+                    self.cfg.channel_id, photo_url, caption=caption, reply_markup=markup
                 )
                 message_id = sent.id
             else:

@@ -25,6 +25,7 @@
 - [The download engine](#the-download-engine)
 - [The processing pipeline](#the-processing-pipeline)
 - [Channels: storage, main, index & the control center](#channels-storage-main-index--the-control-center)
+- [Distribution bots](#distribution-bots)
 - [The log-channel control center](#the-log-channel-control-center)
 - [Localization](#localization)
 - [Configuration reference](#configuration-reference)
@@ -50,7 +51,8 @@ A user asks for a title in a bot chat. NekoFetch identifies it against **AniList
 2. **downloads** every required quality (480p / 720p / 1080p, with fallbacks) in both **sub and dub**, de-masking obfuscated HLS segments byte-for-byte,
 3. **verifies** the files aren't corrupt, **renames**, **tags metadata**, optionally **watermarks**, and attaches an **official TMDB poster thumbnail**,
 4. **uploads** the finished packs to a private storage (database) channel,
-5. **publishes** to the public main channel + an A–Z index channel, and **notifies** the requester.
+5. **publishes** to the public main channel + an A–Z index channel, and **notifies** the requester,
+6. **auto-creates a distribution bot** for each published title with a full catalog of pre-generated content (watch guide, info card, season cards, footer).
 
 The whole operation is observable and controllable from a **single, self-healing control-center channel**: live progress bars, request cards with inline buttons, per-episode **Stop**, whole-series **Cancel**, and a stuck-episode **recovery flow** (Retry / Switch source / Provide file).
 
@@ -79,6 +81,11 @@ Manually sourcing anime is tedious and fragile: streaming sites obfuscate their 
 - **Version picker** for titles with multiple distinct adaptations (e.g. *Hellsing* vs *Hellsing Ultimate*), with **Both** (one combined franchise request) and **Neither** options.
 - **TMDB enrichment** — English/US-region backdrops & posters for the confirmation card and document thumbnails.
 
+### Metadata & info cards
+- **@acutebot integration** — primary metadata source for distribution bot info cards. Sends `/anime <title>` to @acutebot, parses the structured response (title, romaji, genres, rating, status, aired dates, runtime, episode count, synopsis), and **downloads the card photo** to a persistent directory for use as the info-card image.
+- **Graceful fallback chain**: @acutebot → AniList → TMDB. If any source is unavailable, the next is tried automatically.
+- **Strict title matching** — verified via exact English/Romaji matching before being passed to downstream sources.
+
 ### Sourcing & extraction
 - **Multiple providers**: AniKoto, KickAssAnime, Nyaa (torrents), and a Telegram userbot index.
 - **ffmpeg-free HLS engine** that locates and strips the fake-image masks streaming sites prepend to each `.ts` segment, byte-for-byte, producing a clean transport stream.
@@ -101,7 +108,18 @@ Manually sourcing anime is tedious and fragile: streaming sites obfuscate their 
 - **Verify** (ffprobe corruption check), **rename** (template-driven), **metadata** tagging, **branding/watermark** (opt-in), **TMDB poster thumbnails**, and **store**.
 - **Auto-upload** verified packs to a private storage channel, grouped by (season, resolution, audio), with the poster attached as the Telegram document thumbnail.
 - **Publish** to a public main channel + maintain an **A–Z index channel**.
-- **Distribution bots** with temporary access links and auto-deletion.
+- **Distribution bots** with auto-generated content, temporary access links, and auto-deletion.
+
+### Distribution bots
+- **Auto-creation on publish** — when content is published, a dedicated Telegram bot is created (via BotFather) for the title, complete with a profile photo, description, and bound commands.
+- **Auto-generated content** — each bot delivers a curated set of posts in order:
+  1. **Watch guide** (pinned) — overview of seasons and available qualities
+  2. **Info card** — full metadata from @acutebot (title, genres, rating, synopsis) with the AcuteBot photo as the card image
+  3. **Season cards** — one per season, with quality buttons and language info
+  4. **Footer** — branding/cross-promotion
+- **Per-user delivery with auto-delete** — messages are delivered on-demand and automatically cleaned up after a configurable retention period. Grace extension: if the user interacts within the retention window, cleanup is pushed back.
+- **Health checks** — the bot manager periodically checks all distribution bots. If a bot is banned or unreachable, it's **automatically recreated** from scratch (new BotFather flow, new avatar, re-generated content).
+- **Admin controls** — manual recreate via the admin dashboard for instant recovery.
 
 ### Recovery & control (the stuck-episode flow)
 When episodes can't be downloaded after retries, NekoFetch posts an **attention card** naming exactly which version failed (e.g. *Ep 2 · SUB / Ep 5 · DUB*) with:
@@ -115,6 +133,13 @@ When episodes can't be downloaded after retries, NekoFetch posts an **attention 
 - **Prominent failure cards** and a precise, classified reason for every failure.
 - **Build-stamp at startup** so you can confirm a restart actually loaded new code.
 - **Local time** — all displayed timestamps are in the configured display timezone (defaults to **Asia/Dhaka**, UTC+6).
+
+### Main channel
+- **TMDB English backdrop** as the primary post photo (16:9) — falls back to poster art if unavailable.
+- **Franchise-wide synopsis** from TMDB (covers the entire franchise, not just a single season).
+- **HTML-formatted captions** with `<blockquote>`, `<b>` tags matching the reference channel format.
+- **Small-caps Unicode buttons** (`ɪɴᴅᴇx` / `ᴅᴏᴡɴʟᴏᴀᴅ`) — Index links to the A–Z index channel, Download deep-links to the title's distribution bot.
+- Configurable via settings panel (caption template, button text, channel ID).
 
 ---
 
@@ -156,9 +181,9 @@ NekoFetch is a layered, async monolith running on a single event loop:
 ### Data stores, and what lives where
 | Store | Holds |
 |-------|-------|
-| **PostgreSQL** | `users`, `requests`, `download_queue` (jobs), `files` (MediaFile), storage packs — the durable record. |
+| **PostgreSQL** | `users`, `requests`, `download_queue` (jobs), `files` (MediaFile), storage packs, distribution bots, bot content posts, channel posts — the durable record. |
 | **MongoDB** | analytics events, runtime config overrides, distribution/access state. |
-| **Redis** | live progress snapshots, control-center layout ids, Stop/Cancel/skip flags, stuck-episode state, FSM, discussion threads. *(Ephemeral & self-healing.)* |
+| **Redis** | live progress snapshots, control-center layout ids, Stop/Cancel/skip flags, stuck-episode state, FSM, discussion threads, per-user activity tracking. *(Ephemeral & self-healing.)* |
 
 ---
 
@@ -192,7 +217,13 @@ NekoFetch is a layered, async monolith running on a single event loop:
  [7] Auto-upload packs to storage channel (poster thumbnail attached)
    │
    ▼
- [8] (approval gate) ──► publish to main channel + A–Z index ──► notify requester
+ [8] (approval gate) ──► publish to main channel (TMDB backdrop + franchise overview)
+   │                       + A–Z index
+   │                       + auto-create distribution bot with content
+   ▼
+ [9] Distribution bot delivers: Watch guide → Info card (AcuteBot photo + metadata)
+       → Season cards (quality buttons) → Footer (branding)
+       → Auto-deleted after retention period (with grace extension)
 ```
 
 ---
@@ -303,9 +334,45 @@ External tools (ffmpeg/ffprobe/mkvpropedit) are **optional** — a missing tool 
 ## Channels: storage, main, index & the control center
 
 - **Storage (database) channel** — verified packs are auto-uploaded here, grouped by `(season, resolution, audio)`, each document carrying the poster as its Telegram thumbnail. Upload concurrency is tuned (`max_concurrent_transmissions`) for speed.
-- **Main channel** — the public, user-facing channel where published anime are posted (templated captions).
+- **Main channel** — the public, user-facing channel where published anime are posted with:
+  - **TMDB English backdrop** (16:9) as the post photo
+  - **Franchise-wide synopsis** from TMDB (covers the whole franchise, not just one season)
+  - HTML-formatted captions with `<b>` and `<blockquote>` tags
+  - **[Index]** / **[Download]** buttons in small-caps Unicode
 - **Index channel** — an auto-maintained A–Z index of everything published.
-- **Distribution bots** — deliver content with temporary, auto-expiring access links.
+- **Distribution bots** — dedicated Telegram bots per title with auto-generated content (watch guide, info card with AcuteBot photo, season cards, footer), temporary access links, and auto-deletion with grace extension.
+
+---
+
+## Distribution bots
+
+### Auto-creation
+When content is published and `features.distribution_bots` is enabled, NekoFetch automatically:
+1. Generates a bot name and username from the anime title
+2. Drives a BotFather conversation via the userbot to create the bot
+3. Sets a profile photo (TMDB poster, alternated rank to avoid same-image collisions)
+4. Sets the bot description and about text
+5. Registers the bot token, brings it online, and binds it to the title
+
+### Auto-generated content
+Each distribution bot delivers a curated set of posts in order:
+1. **Watch guide** (pinned) — season listing with episode counts per season and available qualities
+2. **Info card** — full metadata from **@acutebot** (title, romaji, genres, format, rating, status, synopsis) with the **AcuteBot photo** as the card image. Falls back to AniList + TMDB if @acutebot is unavailable.
+3. **Season cards** — one per season, with quality buttons and language info. Supports flat layout (dual-audio) and separate-audio sections (English/Japanese).
+4. **Footer** — cross-promotion branding card
+
+### Health checks & auto-recovery
+The bot manager runs a periodic health check (`bot.health_check_interval_minutes`). If a bot is banned or unreachable:
+- A new BotFather flow is triggered to recreate the bot
+- A new avatar is fetched
+- Content is regenerated and re-bound
+- Logged and surfaced in the admin panel
+
+### Per-user delivery & privacy
+- Messages are delivered on-demand when a user starts the bot
+- Auto-deleted after `bot.delivery_retention_days` (configurable)
+- **Grace extension**: if the user interacts within the retention window, cleanup is pushed back
+- Force-subscribe gate can require joining channels before content delivery
 
 ---
 
@@ -364,12 +431,14 @@ NekoFetch reads **environment variables** (secrets/connections) and a **YAML con
 | `NEKO_TZ` | Display timezone (default `Asia/Dhaka`). |
 
 ### Config sections (Pydantic models in `core/config.py`)
-`downloads` · `processing` · `rename` · `metadata` · `thumbnail` · `watermark` · `branding` · `distribution` · `queue` · `security` · `storage_channel` · `log_channel` · `access` · `shortlink` · `acquisition` · `main_channel` · `index_channel` · `sources` · `ui` · `localization`.
+`features` · `downloads` · `processing` · `rename` · `metadata` · `thumbnail` · `watermark` · `branding` · `distribution` · `queue` · `security` · `storage_channel` · `log_channel` · `access` · `shortlink` · `acquisition` · `main_channel` · `index_channel` · `sources` · `ui` · `localization` · `bot`.
 
 Key knobs:
 - `acquisition.target_resolutions` / `resolution_fallbacks` / `languages`
 - `downloads.concurrent_downloads` / `retry_attempts` / `resume_interrupted` / `progress_update_interval_seconds`
 - `log_channel.refresh_seconds` / `active_refresh_seconds` / `divider_sticker_id`
+- `main_channel.caption_template` / `index_button_text` / `download_button_text`
+- `bot.auto_create_on_publish` / `health_check_interval_minutes` / `delivery_retention_days`
 
 ---
 
@@ -432,7 +501,7 @@ Registered in the Telegram "/" menu (admin/owner only):
 | `/cleardownloads` | **Owner** — cancel every active/queued/stuck/orphaned download and clear live progress. The cure for a "ghost" active task. |
 | `/resetoverrides` | **Owner** — clear Mongo runtime config overrides so YAML config wins again. |
 
-**Inline controls** (control-center buttons): assign source · reject · per-episode **Stop** · whole-series **Cancel** · stuck-episode **Retry / Switch source / Provide file**.
+**Inline controls** (control-center buttons): assign source · reject · per-episode **Stop** · whole-series **Cancel** · stuck-episode **Retry / Switch source / Provide file** · bot **Recreate / Create**.
 
 ---
 
@@ -448,6 +517,15 @@ Reusable scripts in `scripts/` (run from the repo root with the venv active):
 | `python scripts/diag_kickass.py "<title>"` | Same, for KickAssAnime. |
 | `node scripts/diag_browser.js [url]` | Capture the **real browser's** network requests (via Playwright) to compare against our extraction — invaluable when a site changes its API. |
 
+Additional diagnostic scripts in `playground/`:
+
+| Script | Purpose |
+|--------|---------|
+| `python playground/probe_acutebot.py <title>` | Test @acutebot metadata fetch + photo download end-to-end. |
+| `python playground/probe_mainchannel.py <anime_doc_id>` | Test main channel publishing flow (facts, caption, buttons). |
+| `python playground/probe_enrich.py` | Compare AniList vs TMDB enrichment (backdrop language tags, synopsis source). |
+| `python playground/probe_card.py` | Preview franchise confirmation cards. |
+
 These were the tools used to root-cause real production issues (a changed episode-list endpoint, a Cloudflare `521` host, a header that tripped a WAF) — keep them; they pay for themselves the next time a site shifts.
 
 ---
@@ -455,13 +533,13 @@ These were the tools used to root-cause real production issues (a changed episod
 ## Testing
 
 ```bash
-pytest -q                 # full suite
+pytest -q                 # full suite (115 tests)
 pytest -q tests/test_download_isolation.py    # one module
 ruff check .              # lint
 mypy src                  # types
 ```
 
-The suite covers franchise totals, parsing, dual-audio strategy, the control-center self-heal, download isolation (Stop/Cancel/normal), caption budgets, permissions/security, templates, progress, and more — all offline with fakes, so it runs anywhere.
+The suite covers franchise totals, parsing, dual-audio strategy, the control-center self-heal, download isolation (Stop/Cancel/normal), caption budgets, permissions/security, templates, progress, bot content generation, bot orchestration, distribution delivery, and more — all offline with fakes, so it runs anywhere.
 
 ---
 
@@ -475,17 +553,25 @@ NekoFetch/
 │   ├── domain/                # enums (JobStatus, RequestStatus, AudioType, …)
 │   ├── bots/
 │   │   ├── admin/             # control bot: handlers (requests, review, commands, settings…)
-│   │   ├── distribution/      # delivery bots
-│   │   ├── manager.py         # starts clients + workers + scheduler
+│   │   ├── distribution/      # delivery bots (content posts, buttons, force-sub, access)
+│   │   ├── manager.py         # starts clients + workers + scheduler + health checks
 │   │   ├── fsm.py             # Redis-backed conversation state
+│   │   ├── force_sub.py       # channel join gate
 │   │   └── middleware.py      # auth middleware
 │   ├── services/              # business logic (download, queue, publishing, channels, …)
+│   │   ├── bot_content.py     # content generation (watch guide, info card, season cards)
+│   │   ├── bot_factory.py     # BotFather-driven bot creation
+│   │   ├── bot_management.py  # bot registration, encryption, bind/rebind
+│   │   ├── bot_orchestrator.py# bot lifecycle coordination
+│   │   ├── bot_naming.py      # name/username generation
+│   │   ├── main_channel_service.py  # public channel publishing
+│   │   ├── index_channel_service.py # A–Z index maintenance
 │   │   └── processing/        # the stage pipeline (verify→…→store)
 │   ├── sources/               # extraction: anikoto, kickassanime, nyaa, telegram,
 │   │   │                       #   _hls (de-mask engine), _diagnostics (classification),
 │   │   │                       #   _mux/_subs/_dualaudio/_transcode/_normalize
 │   │   └── telegram/          # userbot index + manual pack + AniList client
-│   ├── providers/             # metadata (tmdb, anilist series resolver), shortlink
+│   ├── providers/             # metadata (acute_bot, tmdb, anilist), shortlink
 │   ├── infrastructure/
 │   │   ├── database/          # postgres (models/session), mongo, redis (progress store)
 │   │   └── repositories/      # queue, request repositories
@@ -494,7 +580,8 @@ NekoFetch/
 │                               #   progress bars, website report)
 ├── resources/language/        # en.json (and any other locales)
 ├── scripts/                   # ops & diagnostics (above)
-├── tests/                     # offline test suite
+├── playground/                # interactive probe scripts for testing
+├── tests/                     # offline test suite (115 tests)
 ├── pyproject.toml
 └── README.md                  # you are here
 ```
@@ -549,6 +636,8 @@ Displayed times use `NEKO_TZ` (default `Asia/Dhaka`, UTC+6). Storage is always U
 - **De-masking** — stripping the fake-image header obfuscating an HLS segment to recover the real transport stream.
 - **Stuck episode** — one that couldn't be downloaded after retries across all servers; surfaced on an attention card for human recovery.
 - **Control center** — the staff log channel where the whole operation is observed and driven.
+- **Distribution bot** — a dedicated Telegram bot per anime title that delivers curated content (watch guide, info card, season cards).
+- **AcuteBot provider** — primary metadata source that fetches anime info by interacting with @acutebot via the userbot pool.
 
 ---
 

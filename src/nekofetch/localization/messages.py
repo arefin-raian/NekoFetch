@@ -414,6 +414,8 @@ class M:
     BOTS_PENDING_ROW = "bots_pending_row"
     BOTS_BTN_BIND = "bots_btn_bind"
     BOTS_BTN_ADD = "bots_btn_add"
+    BOTS_BTN_CREATE = "bots_btn_create"
+    BOTS_BTN_RECREATE = "bots_btn_recreate"
     BOTS_BIND_PROMPT = "bots_bind_prompt"
     BOTS_ADD_PROMPT = "bots_add_prompt"
     BOTS_VALIDATING = "bots_validating"
@@ -482,6 +484,33 @@ class M:
         "sources": "settings_sec_sources",
         "ui": "settings_sec_ui",
     }
+
+    # ── bot creation / distribution ──
+    BOT_WATCH_GUIDE = "bot_watch_guide"
+    BOT_WATCH_GUIDE_SEASON = "bot_watch_guide_season"
+    BOT_INFO_CARD = "bot_info_card"
+    BOT_SEASON_CARD = "bot_season_card"
+    BOT_MOVIE_CARD = "bot_movie_card"
+    BOT_FOOTER = "bot_footer"
+    BOT_QUALITY_BUTTONS = "bot_quality_buttons"
+    BOT_DOWNLOAD_NOW_BTN = "bot_download_now_btn"
+    BOT_LANG_ENGLISH = "bot_lang_english"
+    BOT_LANG_JAPANESE = "bot_lang_japanese"
+    BOT_QUALITY_480P = "bot_quality_480p"
+    BOT_QUALITY_720P = "bot_quality_720p"
+    BOT_QUALITY_1080P = "bot_quality_1080p"
+    BOT_LOADING_PLACEHOLDER = "bot_loading_placeholder"
+    BOT_COMING_SOON = "bot_coming_soon"
+    ADMIN_BTN_CREATE_BOT = "admin_btn_create_bot"
+    ADMIN_BTN_RECREATE_BOT = "admin_btn_recreate_bot"
+    BOT_CREATING = "bot_creating"
+    BOT_CREATED = "bot_created"
+    BOT_CREATE_FAILED = "bot_create_failed"
+    BOT_RECREATED = "bot_recreated"
+    BOT_BANNED_STATUS = "bot_banned_status"
+    BOT_AUTO_CREATED = "bot_auto_created"
+    BOT_HEALTH_FAILED = "bot_health_failed"
+    BOT_HEALTH_RECREATED = "bot_health_recreated"
 
     # ── errors / notices ──
     ERR_GENERIC = "error_generic"

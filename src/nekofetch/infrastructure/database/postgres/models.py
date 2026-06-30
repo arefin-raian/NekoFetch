@@ -255,6 +255,34 @@ class AnalyticsEvent(Base, PKMixin):
     data: Mapped[dict | None] = mapped_column(JSONB)
 
 
+class BotContentPost(Base, PKMixin, TimestampMixin):
+    """Pre-generated content posts for a distribution bot.
+
+    When a bot is created for an anime, we generate a set of posts (watch guide,
+    season cards, info/overview, footer) that are stored here and delivered in
+    order when a user starts the bot. The admin can edit these via settings.
+    """
+
+    __tablename__ = "bot_content_posts"
+
+    bot_id: Mapped[int] = mapped_column(
+        ForeignKey("bots.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    post_type: Mapped[str] = mapped_column(
+        String(32), nullable=False
+    )  # "watch_guide" | "season_card" | "movie_card" | "info_card" | "footer"
+    season: Mapped[int | None] = mapped_column(Integer)
+    resolution: Mapped[str | None] = mapped_column(String(16))
+    audio: Mapped[str | None] = mapped_column(String(16))  # subbed/dubbed/dual_audio
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    caption: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[str | None] = mapped_column(Text)
+    image_local_path: Mapped[str | None] = mapped_column(Text)
+    button_data: Mapped[dict | None] = mapped_column(JSONB)  # structured button layout
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tg_message_id: Mapped[int | None] = mapped_column(BigInteger)  # set after first send
+
+
 class AuditLog(Base, PKMixin):
     __tablename__ = "audit_logs"
 

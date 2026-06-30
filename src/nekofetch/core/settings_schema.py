@@ -77,11 +77,11 @@ FIELD_DOCS: dict[str, FieldDoc] = {
     "main_channel.caption_template": FieldDoc(
         desc="Caption for each anime posted to the public main channel.",
         placeholders=_MAIN, html=True,
-        example="{title} 『 #{tag} 』\\n⌬ EPISODES : {episodes}"),
+        example="{title}『 #{tag} 』\\n⌬ EPISODES : {episodes}"),
     "main_channel.index_button_text": FieldDoc(
-        desc="Label of the Index button.", example="Index"),
+        desc="Label of the Index button (small caps Unicode supported).", example="ɪɴᴅᴇx"),
     "main_channel.download_button_text": FieldDoc(
-        desc="Label of the Download button.", example="Download"),
+        desc="Label of the Download button (small caps Unicode supported).", example="ᴅᴏᴡɴʟᴏᴀᴅ"),
 
     # ── index channel ──
     "index_channel.letter_header_template": FieldDoc(
@@ -136,6 +136,23 @@ FIELD_DOCS: dict[str, FieldDoc] = {
     "security.rate_limit_per_minute": FieldDoc(
         desc="Max actions per user per minute.", example="20"),
 
+    # ── bot / distribution bots ──
+    "bot.auto_create_on_publish": FieldDoc(
+        desc="Auto-create a distribution bot when content is published."),
+    "bot.avatar_source": FieldDoc(
+        desc="Which poster rank to use for the bot's profile photo.",
+        options=("tmdb_rank1", "tmdb_rank0", "anilist_cover"),
+        example="tmdb_rank1  (rank=1 = different from file thumbnail)"),
+    "bot.delivery_retention_days": FieldDoc(
+        desc="Days before bot-delivered messages auto-delete per user (0 = never).",
+        example="7"),
+    "bot.health_check_interval_minutes": FieldDoc(
+        desc="Minutes between bot ban-detection health checks (0 = disabled).",
+        example="60"),
+    "bot.watch_guide_title": FieldDoc(
+        desc="Title of the pinned watch guide in the bot.", html=True,
+        example="📍 Guide To Watch The Anime"),
+
     # ── access / shortlink ──
     "access.trial_days": FieldDoc(desc="Free-trial length in days.", example="3"),
     "access.token_days": FieldDoc(desc="How many days a renewed token grants.", example="3"),
@@ -157,6 +174,7 @@ FIELD_DOCS: dict[str, FieldDoc] = {
 OWNER_ONLY_SECTIONS = frozenset({
     "security", "sources", "access", "shortlink",
     "storage_channel", "log_channel", "main_channel", "index_channel",
+    "bot",
 })
 
 

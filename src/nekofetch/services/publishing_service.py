@@ -115,10 +115,10 @@ class PublishingService:
         return len(snapshot)
 
     async def publish(self, code: str) -> int:
-        """Make stored content user-visible: post to the main channel + index.
+        """Make stored content user-visible: create bot → post to main channel + index.
 
-        Packs are already in the database channel (auto-uploaded after processing);
-        this step is the deliberate, separate "go live" action.
+        Correct flow: storage → bot creation/configuration → main channel post →
+        redirect via Download button to the bot.
         """
         async with session_scope(self._c.pg_sessionmaker) as session:
             req = await RequestRepository(session).get_by_code(code)
@@ -142,6 +142,13 @@ class PublishingService:
             "publish", anime_doc_id=anime_doc_id, data={"code": code, "files": count}
         )
 
+        # Step 1: Create distribution bot (if auto-create is enabled and feature is on).
+        if self._c.config.features.distribution_bots and self._c.config.bot.auto_create_on_publish:
+            from nekofetch.services.bot_orchestrator import BotOrchestratorService
+
+            await BotOrchestratorService(self._c).ensure_bot_for_anime(anime_doc_id)
+
+        # Step 2: Post to main channel (the Download button now has the bot username).
         from nekofetch.services.index_channel_service import IndexChannelService
         from nekofetch.services.main_channel_service import MainChannelService
 
