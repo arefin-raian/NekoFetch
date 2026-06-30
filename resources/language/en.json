@@ -182,6 +182,7 @@
   "cmd_reload": "Reload text/config from en.json (admin)",
   "cmd_resetoverrides": "Clear saved config overrides so config.yaml wins (admin)",
   "cmd_cleardownloads": "Clear all active/stuck downloads (owner)",
+  "bot_desc_placeholder": "📺 {title}\n\n<i>Placeholder description — to be updated.</i>",
   "reload_done": "✅  <b>Reloaded {count} strings</b> from\n<code>{path}</code>",
   "overrides_cleared": "✅  <b>Cleared {count} config overrides.</b>\n<i>config.yaml is authoritative again after the next restart.</i>",
   "help_title": "🐾 <b>NekoFetch — Help</b>",

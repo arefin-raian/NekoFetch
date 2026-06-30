@@ -158,39 +158,48 @@ class TmdbClient:
             return neutral[0].get("file_path")
         return sorted(backdrops, key=quality, reverse=True)[0].get("file_path")
 
-    async def _english_poster(self, tmdb_id: int, media_type: str) -> str | None:
-        """Best **English / region-neutral** poster path — the same set TMDB's
+    async def _ranked_posters(self, tmdb_id: int, media_type: str) -> list[str]:
+        """English/region-neutral poster paths, best-first — the same set TMDB's
         ``/images/posters?image_language=en&image_region=US`` page shows. English
-        title-art poster first, then language-neutral, ranked by rating/votes/res."""
+        title-art posters first, then language-neutral, ranked by rating/votes/res."""
         try:
             imgs = await self._get(f"/{media_type}/{tmdb_id}/images",
                                    include_image_language="en,null")
         except (httpx.HTTPError, ValueError):
-            return None
+            return []
         posters = imgs.get("posters", [])
-        if not posters:
-            return None
 
         def quality(b: dict) -> tuple:
             return (b.get("vote_average") or 0, b.get("vote_count") or 0, b.get("width") or 0)
 
-        for keep in (lambda b: b.get("iso_639_1") == "en",
-                     lambda b: not b.get("iso_639_1"),
-                     lambda b: True):
-            chosen = sorted((b for b in posters if keep(b)), key=quality, reverse=True)
-            if chosen:
-                return chosen[0].get("file_path")
-        return None
+        english = sorted((b for b in posters if b.get("iso_639_1") == "en"),
+                         key=quality, reverse=True)
+        neutral = sorted((b for b in posters if not b.get("iso_639_1")),
+                         key=quality, reverse=True)
+        seen: set = set()
+        out: list[str] = []
+        for b in (*english, *neutral):
+            path = b.get("file_path")
+            if path and path not in seen:
+                seen.add(path)
+                out.append(path)
+        return out
 
-    async def poster_for(self, title: str, *, size: str = "w342") -> str | None:
-        """Official English/US poster URL for ``title``, sized for a thumbnail.
+    async def _english_poster(self, tmdb_id: int, media_type: str) -> str | None:
+        ranked = await self._ranked_posters(tmdb_id, media_type)
+        return ranked[0] if ranked else None
 
-        Used to give uploaded files a proper Telegram document thumbnail instead of
-        an ffmpeg frame-grab. Returns ``None`` if TMDB has no match."""
+    async def poster_for(self, title: str, *, size: str = "w342", rank: int = 0) -> str | None:
+        """Official English/US poster URL for ``title``, sized for the use site.
+
+        ``rank=0`` is the best poster (used for file thumbnails); ``rank=1`` returns
+        a DIFFERENT poster (used for a bot's profile photo) so the avatar isn't a
+        carbon copy of the file thumbnails. Falls back to the best available."""
         res = await self.search(title)
         if res is None:
             return None
-        path = await self._english_poster(res.id, res.media_type)
-        if path:
+        ranked = await self._ranked_posters(res.id, res.media_type)
+        if ranked:
+            path = ranked[rank] if rank < len(ranked) else ranked[0]
             return f"{IMG_BASE}/{size}{path}"
         return res.poster_url

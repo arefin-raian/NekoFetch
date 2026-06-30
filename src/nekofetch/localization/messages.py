@@ -276,6 +276,7 @@ class M:
     CMD_RELOAD = "cmd_reload"
     CMD_RESETOVERRIDES = "cmd_resetoverrides"
     CMD_CLEARDOWNLOADS = "cmd_cleardownloads"
+    BOT_DESC_PLACEHOLDER = "bot_desc_placeholder"
     RELOAD_DONE = "reload_done"
     OVERRIDES_CLEARED = "overrides_cleared"
     HELP_TITLE = "help_title"
