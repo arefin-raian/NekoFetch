@@ -63,7 +63,17 @@ class UserbotPool:
     @classmethod
     def from_env(cls, api_id: int, api_hash: str, workdir: str = "sessions") -> UserbotPool:
         """Load accounts from ``TELEGRAM_USERBOT_ACCOUNTS`` (JSON list of
-        ``{"name","session_string"}``) or single ``TELEGRAM_USERBOT_SESSION``."""
+        ``{"name","session_string"}``) or single ``TELEGRAM_USERBOT_SESSION``.
+
+        ``.env`` is loaded first: pydantic-settings reads ``.env`` into the config
+        model but NOT into ``os.environ``, so without this the session string is
+        invisible here and the pool would fall back to an interactive login."""
+        try:
+            from dotenv import load_dotenv
+
+            load_dotenv()
+        except Exception:  # noqa: BLE001 - dotenv optional; real env vars still work
+            pass
         raw = os.getenv("TELEGRAM_USERBOT_ACCOUNTS")
         accounts: list[Account] = []
         if raw:

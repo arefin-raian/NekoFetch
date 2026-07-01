@@ -387,6 +387,8 @@ f"{bq(f'complete this link, then you\'ll return to the bot '
 
     @client.on_callback_query(filters.regex(r"^d\|nolink"))
     async def _nolink(_: Client, q: CallbackQuery) -> None:
-        await q.answer()  # silent dismiss — this is a visual label only
+        # A language header isn't a link — tapping it previews the instruction to
+        # pick a quality from the row beneath it.
+        await q.answer(_t(_M.BOT_CHOOSE_QUALITY), show_alert=True)
 
     return client

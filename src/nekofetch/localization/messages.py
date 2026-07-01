@@ -496,6 +496,7 @@ class M:
     BOT_DOWNLOAD_NOW_BTN = "bot_download_now_btn"
     BOT_LANG_ENGLISH = "bot_lang_english"
     BOT_LANG_JAPANESE = "bot_lang_japanese"
+    BOT_CHOOSE_QUALITY = "bot_choose_quality"
     BOT_QUALITY_480P = "bot_quality_480p"
     BOT_QUALITY_720P = "bot_quality_720p"
     BOT_QUALITY_1080P = "bot_quality_1080p"

@@ -62,7 +62,7 @@ def format_bot_name(
     return f"{title}{suffix}"
 
 
-def format_bot_username(base: str, anime_doc_id: str, *, suffix: str = "ani_weebs") -> str:
+def format_bot_username(base: str, anime_doc_id: str, *, suffix: str = "axw") -> str:
     """A valid, reasonably-unique bot username candidate (5–32 chars, ends in 'bot').
 
     Telegram requires usernames to be unique, so BotFather may still reject this and

@@ -182,16 +182,20 @@ class TestBuildInfoCard:
         caption, image = await svc._build_info_card(meta)
         assert image == "https://example.com/banner.jpg"
 
-    async def test_first_aired_from_release_date(self):
+    async def test_aired_dates_and_runtime_from_acutebot_fields(self):
         svc = _make_service()
         meta = {
             "title": "Test",
             "genres": [],
-            "release_date": "2021-01-10 to 2021-03-28",
+            "first_aired": "2021-01-10",
+            "last_aired": "2021-03-28",
+            "runtime": "24 min/ep",
         }
         caption, image = await svc._build_info_card(meta)
         assert caption is not None
         assert "2021-01-10" in caption
+        assert "2021-03-28" in caption
+        assert "24 min/ep" in caption
 
     async def test_fallback_to_placeholder(self):
         svc = _make_service()

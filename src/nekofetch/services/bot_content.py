@@ -71,16 +71,10 @@ class BotContentService:
         posts: list[BotContentPost] = []
         order = 0
 
-        # 1. Watch guide (pinned).
-        guide = self._build_watch_guide(meta, packs)
-        if guide:
-            posts.append(BotContentPost(
-                bot_id=bot_id, post_type="watch_guide", order=order,
-                caption=guide, is_pinned=True,
-            ))
-            order += 1
+        # Order mirrors the reference channels (top → bottom):
+        #   1. Info/overview card  2. Season cards  3. Watch guide (pinned)  4. Footer
 
-        # 2. Info/overview card.
+        # 1. Info/overview card.
         info_caption, info_image = await self._build_info_card(meta)
         if info_caption:
             posts.append(BotContentPost(
@@ -89,7 +83,7 @@ class BotContentService:
             ))
             order += 1
 
-        # 3. Season cards — one per season found in storage packs.
+        # 2. Season cards — one per season found in storage packs.
         seasons = sorted({p.season for p in packs if p.season is not None})
         for season in seasons:
             season_packs = [p for p in packs if p.season == season]
@@ -100,6 +94,15 @@ class BotContentService:
                 order=order, caption=caption,
                 image_url=str(image) if image else None,
                 button_data=buttons,
+            ))
+            order += 1
+
+        # 3. Watch guide (pinned) — near the end, just before the footer.
+        guide = self._build_watch_guide(meta, packs)
+        if guide:
+            posts.append(BotContentPost(
+                bot_id=bot_id, post_type="watch_guide", order=order,
+                caption=guide, is_pinned=True,
             ))
             order += 1
 
@@ -269,9 +272,10 @@ class BotContentService:
             format=meta.get("format") or "—",
             rating=meta.get("score") or "—",
             status=meta.get("status") or "—",
-            first_aired=(meta.get("release_date") or "").split(" to ")[0] if meta.get("release_date") else "—",
-            last_aired=(meta.get("release_date") or "").split(" to ")[-1] if meta.get("release_date") else "—",
-            runtime="24 minutes",
+            # Use AcuteBot's parsed fields directly (release_date never existed here).
+            first_aired=meta.get("first_aired") or "—",
+            last_aired=meta.get("last_aired") or "—",
+            runtime=meta.get("runtime") or "—",
             episodes=str(meta.get("episode_count") or "—"),
             synopsis=(meta.get("synopsis") or "")[:400] or "—",
         )
@@ -280,12 +284,20 @@ class BotContentService:
     def _build_season_card(self, meta: dict, season: int, packs: list[StoragePack]) -> tuple[str, str | None]:
         """Build a season entry card matching the reference format."""
         ep_max = max((p.episode_to or p.file_count or 0) for p in packs)
-        # Determine language from audio types.
+        # Determine language from audio types, formatted like the reference channels:
+        # dual/both → "Dual [English & Japanese]", single → just the language.
         audios = {p.audio for p in packs}
-        langs = []
+        langs: list[str] = []
         for a in audios:
             langs.extend(_AUDIO_LANG.get(a, []))
-        lang_str = " & ".join(dict.fromkeys(langs)) or "—"
+        langs = list(dict.fromkeys(langs))
+        is_dual = AudioType.DUAL_AUDIO in audios or (
+            AudioType.SUBBED in audios and AudioType.DUBBED in audios
+        )
+        if is_dual and langs:
+            lang_str = f"Dual [{' & '.join(langs)}]"
+        else:
+            lang_str = " & ".join(langs) or "—"
         # Collect qualities.
         quals = sorted(
             {p.resolution for p in packs},
@@ -316,6 +328,7 @@ class BotContentService:
                 M.BOT_SEASON_CARD,
                 title=title, season=season,
                 episodes=ep_max or "—",
+                S="S" if (ep_max or 0) != 1 else "",   # EPISODE vs EPISODES
                 rating=score,
                 language=lang_str,
                 genres=genres,
