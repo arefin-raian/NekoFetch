@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 
@@ -168,17 +169,20 @@ class MainChannelService:
         try:
             if existing_id:
                 await client.edit_message_caption(
-                    self.cfg.channel_id, existing_id, caption=caption, reply_markup=markup
+                    self.cfg.channel_id, existing_id, caption=caption, reply_markup=markup,
+                    parse_mode=ParseMode.HTML,
                 )
                 message_id = existing_id
             elif photo_url:
                 sent = await client.send_photo(
-                    self.cfg.channel_id, photo_url, caption=caption, reply_markup=markup
+                    self.cfg.channel_id, photo_url, caption=caption, reply_markup=markup,
+                    parse_mode=ParseMode.HTML,
                 )
                 message_id = sent.id
             else:
                 sent = await client.send_message(
-                    self.cfg.channel_id, caption, reply_markup=markup
+                    self.cfg.channel_id, caption, reply_markup=markup,
+                    parse_mode=ParseMode.HTML,
                 )
                 message_id = sent.id
         except Exception as exc:  # noqa: BLE001

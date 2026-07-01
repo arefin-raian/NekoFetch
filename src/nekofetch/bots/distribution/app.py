@@ -10,7 +10,6 @@ from pyrogram.types import BotCommand, CallbackQuery, InlineKeyboardButton, Inli
 from nekofetch.bots.fsm import FSM
 from nekofetch.core.container import Container
 from nekofetch.core.exceptions import NekoFetchError
-from nekofetch.domain.enums import AudioType
 from nekofetch.infrastructure.database.postgres.models import BotContentPost, DistributionBot
 from nekofetch.infrastructure.database.postgres.session import session_scope
 from nekofetch.localization.messages import M
@@ -18,12 +17,6 @@ from nekofetch.services.distribution_service import DistributionService
 from nekofetch.ui.components import cb, keyboard, parse_cb
 from nekofetch.ui.progress import loading_animation, staged_loading
 from nekofetch.ui.typography import bq, bqx
-
-_AUDIO_LABELS = {
-    AudioType.SUBBED.value: "subbed",
-    AudioType.DUBBED.value: "dubbed",
-    AudioType.DUAL_AUDIO.value: "dual audio",
-}
 
 DISTRIBUTION_COMMANDS = [
     BotCommand("start", "Browse the library / open a title"),
@@ -130,11 +123,20 @@ def build_distribution_bot(
         return InlineKeyboardMarkup(rows) if rows else None
 
     async def _send_posts(chat_id: int) -> list[int]:
-        """Send all content posts for this bot. Returns sent message ids."""
+        """Send all content posts for this bot, with divider stickers between sections."""
         posts = await _load_posts()
         sent_ids: list[int] = []
+        divider_id = container.config.bot.divider_sticker_id
 
-        for post in posts:
+        for i, post in enumerate(posts):
+            # Divider sticker between major sections (not before the first post).
+            if i > 0 and divider_id:
+                try:
+                    div = await client.send_sticker(chat_id, divider_id)
+                    sent_ids.append(div.id)
+                except Exception:
+                    pass
+
             markup = _build_buttons(post)
             try:
                 if post.image_url:
@@ -351,7 +353,9 @@ f"{bq(f'complete this link, then you\'ll return to the bot '
     async def _passes_force_sub(message: Message) -> bool:
         from nekofetch.bots.force_sub import channels_to_join, join_keyboard
 
-        pending = await channels_to_join(client, container, message.from_user.id)
+        pending = await channels_to_join(
+            client, container, message.from_user.id, dist=True
+        )
         if not pending:
             return True
         join_msg = "please join the channel(s) below, then tap i ve joined."
@@ -367,7 +371,7 @@ f"{bq(f'complete this link, then you\'ll return to the bot '
     async def _fsub_retry(_: Client, q: CallbackQuery) -> None:
         from nekofetch.bots.force_sub import channels_to_join
 
-        pending = await channels_to_join(client, container, q.from_user.id)
+        pending = await channels_to_join(client, container, q.from_user.id, dist=True)
         if pending:
             await q.answer(container.localizer.get(M.DIST_NOT_SUBSCRIBED), show_alert=True)
             return

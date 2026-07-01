@@ -129,9 +129,14 @@ FIELD_DOCS: dict[str, FieldDoc] = {
 
     # ── security / force-sub ──
     "security.force_subscribe": FieldDoc(
-        desc="Require users to join channels before using the bot."),
+        desc="Require users to join channels before using the NekoFetch admin bot."),
     "security.force_subscribe_channels": FieldDoc(
-        desc="Channel IDs users must join (comma-separated -100… ids).",
+        desc="Channel IDs users must join for admin bot (comma-separated -100… ids).",
+        example="-1001234567890, -1009876543210"),
+    "security.dist_force_subscribe": FieldDoc(
+        desc="Require users to join channels before using distribution bots (separate from admin)."),
+    "security.dist_force_subscribe_channels": FieldDoc(
+        desc="Channel IDs users must join for distribution bots (comma-separated -100… ids).",
         example="-1001234567890, -1009876543210"),
     "security.rate_limit_per_minute": FieldDoc(
         desc="Max actions per user per minute.", example="20"),
@@ -149,9 +154,15 @@ FIELD_DOCS: dict[str, FieldDoc] = {
     "bot.health_check_interval_minutes": FieldDoc(
         desc="Minutes between bot ban-detection health checks (0 = disabled).",
         example="60"),
-    "bot.watch_guide_title": FieldDoc(
-        desc="Title of the pinned watch guide in the bot.", html=True,
-        example="📍 Guide To Watch The Anime"),
+    "bot.footer_image_url": FieldDoc(
+        desc="Image shown on the footer post of every distribution bot. URL or Telegram file_id; empty = no image.",
+        example="https://files.catbox.moe/example.png"),
+    "bot.footer_text": FieldDoc(
+        desc="Override the built-in footer text (empty = use the en.json template). Unicode small-caps and special characters are supported.",
+        example="ANIME WEEBS — feel the story, live the art"),
+    "bot.divider_sticker_id": FieldDoc(
+        desc="Sticker sent between content sections (info → seasons → guide → footer). Telegram file_id; empty = no dividers.",
+        example="CAACAgUAAxkBAAI5pmpE1uh9_sD-z2tYJ3wlado6vS29AAIY..."),
 
     # ── access / shortlink ──
     "access.trial_days": FieldDoc(desc="Free-trial length in days.", example="3"),

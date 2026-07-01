@@ -21,7 +21,7 @@ from sqlalchemy import select
 
 from nekofetch.core.container import Container
 from nekofetch.core.logging import get_logger
-from nekofetch.domain.enums import AudioType, ContentKind
+from nekofetch.domain.enums import AudioType
 from nekofetch.infrastructure.database.postgres.models import (
     BotContentPost,
     DistributionBot,
@@ -34,11 +34,6 @@ from nekofetch.ui import templates
 log = get_logger(__name__)
 
 _RES_ORDER = {"360p": 360, "480p": 480, "540p": 540, "720p": 720, "1080p": 1080}
-_AUDIO_LANG = {
-    AudioType.DUBBED: ["English"],
-    AudioType.SUBBED: ["Japanese"],
-    AudioType.DUAL_AUDIO: ["English", "Japanese"],
-}
 _BTN_QUALITIES = ("480p", "720p", "1080p")
 
 
@@ -106,10 +101,13 @@ class BotContentService:
             ))
             order += 1
 
-        # 4. Footer.
+        # 4. Footer — text from en.json (or config override), image from config.
+        footer_text = self._c.config.bot.footer_text or t(M.BOT_FOOTER)
+        footer_image = self._c.config.bot.footer_image_url or None
         posts.append(BotContentPost(
             bot_id=bot_id, post_type="footer", order=order,
-            caption=t(M.BOT_FOOTER),
+            caption=footer_text,
+            image_url=footer_image,
         ))
 
         # Persist all posts.
@@ -281,23 +279,56 @@ class BotContentService:
         )
         return caption, image
 
+    @staticmethod
+    def _audio_display(audios: set[AudioType], *, extra_langs: set[str] | None = None) -> str:
+        """Logic-driven audio tag: Sub / Dub / Dual / Multi.
+
+        ``extra_langs`` (optional set of language codes like ``{"en","ja","hi"}``)
+        lets the caller distinguish Multi (3+) from Dual when both have
+        DUAL_AUDIO in storage. Like ``bot_naming.audio_tag()``.
+        """
+        has_dual = AudioType.DUAL_AUDIO in audios
+        has_both = AudioType.SUBBED in audios and AudioType.DUBBED in audios
+        langs = {l.strip().lower() for l in (extra_langs or set()) if l and l.strip()}
+        multi = len(langs) >= 3
+
+        if has_dual or has_both:
+            return "Multi" if multi else "Dual"
+        if AudioType.DUBBED in audios:
+            return "Dub"
+        if AudioType.SUBBED in audios:
+            return "Sub"
+        return "—"
+
+    @staticmethod
+    def _language_display(audios: set[AudioType], *, extra_langs: set[str] | None = None, has_english_subs: bool = False) -> str:
+        """Presentation-driven language label (raw value — no brackets).
+        Sub-only  → JPN + EngSubs
+        Dub-only  → English
+        Dub+subs  → ENG + Subs
+        Dual      → ENG + JPN
+        Multi     → ENG + JPN + HIN  (canonical triple per WANTED_AUDIO in _mux.py)
+        """
+        has_sub = AudioType.SUBBED in audios
+        has_dub = AudioType.DUBBED in audios
+        has_dual = AudioType.DUAL_AUDIO in audios
+        langs = {l.strip().lower() for l in (extra_langs or set()) if l and l.strip()}
+        multi = len(langs) >= 3
+
+        if has_dual or (has_sub and has_dub):
+            return "ENG + JPN + HIN" if multi else "ENG + JPN"
+        if has_dub:
+            return "ENG + Subs" if has_english_subs else "English"
+        if has_sub:
+            return "JPN + EngSubs"
+        return "—"
+
     def _build_season_card(self, meta: dict, season: int, packs: list[StoragePack]) -> tuple[str, str | None]:
         """Build a season entry card matching the reference format."""
         ep_max = max((p.episode_to or p.file_count or 0) for p in packs)
-        # Determine language from audio types, formatted like the reference channels:
-        # dual/both → "Dual [English & Japanese]", single → just the language.
         audios = {p.audio for p in packs}
-        langs: list[str] = []
-        for a in audios:
-            langs.extend(_AUDIO_LANG.get(a, []))
-        langs = list(dict.fromkeys(langs))
-        is_dual = AudioType.DUAL_AUDIO in audios or (
-            AudioType.SUBBED in audios and AudioType.DUBBED in audios
-        )
-        if is_dual and langs:
-            lang_str = f"Dual [{' & '.join(langs)}]"
-        else:
-            lang_str = " & ".join(langs) or "—"
+        audio_str = self._audio_display(audios)
+        lang_str = self._language_display(audios)
         # Collect qualities.
         quals = sorted(
             {p.resolution for p in packs},
@@ -320,6 +351,7 @@ class BotContentService:
                 M.BOT_MOVIE_CARD,
                 title=title,
                 duration=f"1h {ep_max or 0}m",
+                audio=audio_str,
                 language=lang_str,
                 synopsis=synopsis,
             )
@@ -330,6 +362,7 @@ class BotContentService:
                 episodes=ep_max or "—",
                 S="S" if (ep_max or 0) != 1 else "",   # EPISODE vs EPISODES
                 rating=score,
+                audio=audio_str,
                 language=lang_str,
                 genres=genres,
                 synopsis=synopsis,

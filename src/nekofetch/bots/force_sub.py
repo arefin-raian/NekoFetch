@@ -15,14 +15,25 @@ _NOT_MEMBER = {"LEFT", "BANNED", "RESTRICTED"}
 
 
 async def channels_to_join(
-    client: Client, container: Container, user_id: int
+    client: Client, container: Container, user_id: int, *, dist: bool = False
 ) -> list[tuple[str, str | None]]:
+    """Return the channels this user still needs to join.
+
+    Set ``dist=True`` to use the distribution-bot-specific force-sub settings;
+    otherwise the NekoFetch admin bot settings are used.
+    """
     sec = container.config.security
-    if not sec.force_subscribe or not sec.force_subscribe_channels:
-        return []
+    if dist:
+        if not sec.dist_force_subscribe or not sec.dist_force_subscribe_channels:
+            return []
+        channels = sec.dist_force_subscribe_channels
+    else:
+        if not sec.force_subscribe or not sec.force_subscribe_channels:
+            return []
+        channels = sec.force_subscribe_channels
 
     missing: list[int] = []
-    for channel in sec.force_subscribe_channels:
+    for channel in channels:
         try:
             member = await client.get_chat_member(channel, user_id)
             status = getattr(member.status, "name", str(member.status)).upper()

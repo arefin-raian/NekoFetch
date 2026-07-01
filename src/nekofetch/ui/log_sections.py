@@ -34,6 +34,8 @@ _AUDIO_LABEL = {
     "subbed": "SUB", "sub": "SUB",
     "dubbed": "DUB", "dub": "DUB",
     "dual_audio": "DUAL", "dual": "DUAL",
+    # Short forms from the rename template {audio} variable:
+    "Sub": "SUB", "Dub": "DUB", "Dual": "DUAL", "Multi": "MULTI",
 }
 
 # Human-friendly notice labels keyed by "category.action". Anything not listed

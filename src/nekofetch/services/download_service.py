@@ -572,8 +572,8 @@ class DownloadWorker:
         base = self._c.env.storage_path / "work" / folder
         base.mkdir(parents=True, exist_ok=True)
         stem = f"S{ep.season:02d}E{ep.number:03d}_{resolution}"
-        sub_dest = base / f"{stem}_subbed.mkv"
-        dub_dest = base / f"{stem}_dubbed.mkv"
+        sub_dest = base / f"{stem}_Sub.mkv"
+        dub_dest = base / f"{stem}_Dub.mkv"
         a, b, c = cfg.retry_attempts, cfg.retry_backoff_seconds, None  # retry args
 
         sub = await self._best_variant(chain, ep.number, AudioType.SUBBED)

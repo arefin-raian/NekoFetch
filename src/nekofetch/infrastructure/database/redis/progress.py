@@ -27,7 +27,7 @@ class ProgressSnapshot:
     label: str | None = None
     stage: str | None = None       # human stage: Downloading / Compressing / Muxing …
     resolution: str | None = None  # e.g. "1080p" — the variant currently in flight
-    audio: str | None = None       # "subbed" / "dubbed" / "dual_audio"
+    audio: str | None = None       # "Sub" / "Dub" / "Dual"
     season: int | None = None
     episode_index: int | None = None   # n-th of total_episodes
     total_episodes: int | None = None

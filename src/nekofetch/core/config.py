@@ -184,8 +184,12 @@ class QueueConfig(BaseModel):
 class SecurityConfig(BaseModel):
     rate_limit_per_minute: int = 20
     anti_spam_cooldown_seconds: int = 2
+    # NekoFetch (admin) bot force-subscription.
     force_subscribe: bool = False
     force_subscribe_channels: list[int] = Field(default_factory=list)
+    # Distribution bots force-subscription (separate from admin bot).
+    dist_force_subscribe: bool = False
+    dist_force_subscribe_channels: list[int] = Field(default_factory=list)
     owner_id: int = 0
 
 
@@ -284,7 +288,7 @@ class MainChannelConfig(BaseModel):
     channel_id: int = 0
     # Variables: {title} {tag} {episodes} {qualities} {languages} {genres} {overview}
     caption_template: str = (
-        "<blockquote><b>{title}『 #{tag} 』</b></blockquote>\n\n"
+        "<blockquote><b>{title}『 </b>#{tag} <b>』</b></blockquote>\n\n"
         "<b>⌬ EPISODES :</b> {episodes}\n"
         "<b>⌬ QUALITY :</b> {qualities}\n"
         "<b>⌬ LANGUAGE :</b> {languages}\n"
@@ -333,6 +337,13 @@ class BotConfig(BaseModel):
     health_check_interval_minutes: int = 60
     delivery_retention_days: int = 7
     avatar_source: str = "tmdb"  # "tmdb" | "anilist"
+    # Footer shown on the last post of every distribution bot.
+    footer_image_url: str = ""   # URL or Telegram file_id; empty = no image
+    footer_text: str = ""        # override the built-in bot_footer template (empty = use en.json)
+    # Divider sticker sent between content sections (info → seasons → guide → footer).
+    divider_sticker_id: str = (
+        "CAACAgUAAxkBAAI5pmpE1uh9_sD-z2tYJ3wlado6vS29AAIYAANDc8kSzixbXL29lfc8BA"
+    )
 
 
 class AppConfig(BaseModel):

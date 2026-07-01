@@ -242,7 +242,8 @@ class TestBuildSeasonCard:
         packs = [_pack(audio=AudioType.DUAL_AUDIO, episode_to=12)]
         caption, image = svc._build_season_card(meta, 1, packs)
         assert caption is not None
-        assert "English" in caption
+        assert "Dual" in caption
+        assert "ENG + JPN" in caption
 
     def test_language_subbed_only(self):
         svc = _make_service()
@@ -250,7 +251,8 @@ class TestBuildSeasonCard:
         packs = [_pack(audio=AudioType.SUBBED, episode_to=12)]
         caption, image = svc._build_season_card(meta, 1, packs)
         assert caption is not None
-        assert "Japanese" in caption
+        assert "Sub" in caption
+        assert "JPN + EngSubs" in caption
 
     def test_language_dubbed_only(self):
         svc = _make_service()
@@ -258,7 +260,31 @@ class TestBuildSeasonCard:
         packs = [_pack(audio=AudioType.DUBBED, episode_to=12)]
         caption, image = svc._build_season_card(meta, 1, packs)
         assert caption is not None
+        assert "Dub" in caption
         assert "English" in caption
+
+    def test_language_dubbed_with_subs(self):
+        """English audio with subtitles → ENG + Subs."""
+        svc = _make_service()
+        result = svc._language_display({AudioType.DUBBED}, has_english_subs=True)
+        assert result == "ENG + Subs"
+        result = svc._language_display({AudioType.DUBBED}, has_english_subs=False)
+        assert result == "English"
+
+    def test_multi_audio_with_extra_langs(self):
+        """When extra_langs has 3+ languages, DUAL_AUDIO → Multi / ENG+JPN+HIN."""
+        svc = _make_service()
+        audios = {AudioType.DUAL_AUDIO}
+        assert "Multi" == svc._audio_display(audios, extra_langs={"en", "ja", "hi"})
+        assert "Dual" == svc._audio_display(audios, extra_langs={"en", "ja"})
+        assert "Dual" == svc._audio_display(audios)  # no extra_langs
+        assert "ENG + JPN + HIN" == svc._language_display(audios, extra_langs={"en", "ja", "hi"})
+        assert "ENG + JPN" == svc._language_display(audios, extra_langs={"en", "ja"})
+        # Sub-only: no brackets, raw value.
+        assert "JPN + EngSubs" == svc._language_display({AudioType.SUBBED})
+        # Dub-only: "English" by default, "ENG + Subs" when has_english_subs.
+        assert "English" == svc._language_display({AudioType.DUBBED})
+        assert "ENG + Subs" == svc._language_display({AudioType.DUBBED}, has_english_subs=True)
 
     def test_image_is_poster_url(self):
         svc = _make_service()
