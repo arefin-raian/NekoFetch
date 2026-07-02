@@ -164,6 +164,11 @@ class PublishingService:
             audio=aud, resolution=res,
         )
 
+        # Refresh database stats (pinned message in index channel)
+        from nekofetch.services.stats_service import StatsService
+
+        await StatsService(self._c).refresh()
+
         if user_id:
             from nekofetch.services.notification_service import NotificationService
             await NotificationService(self._c).request_published(user_id, title, code)

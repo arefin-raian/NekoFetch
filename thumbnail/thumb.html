@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>AniMovie Weebs — Suzume</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #080c10;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+/* ─────────────────────────────────────────
+   CARD CANVAS  1440 × 810
+───────────────────────────────────────── */
+.card {
+  position: relative;
+  width: 1440px;
+  height: 810px;
+  overflow: hidden;
+  font-family: 'Poppins', 'Inter', system-ui, sans-serif;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────
+   BACKGROUND  →  background.webp
+───────────────────────────────────────── */
+.bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  z-index: 0;
+}
+
+/* Bottom gradient scrim — fades art into darkness for text legibility */
+.scrim-bottom {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.90) 0%,
+    rgba(0, 0, 0, 0.60) 22%,
+    rgba(0, 0, 0, 0.10) 48%,
+    transparent 65%
+  );
+  z-index: 1;
+}
+
+/* Left gradient scrim — darkens left column for badge/title/info legibility */
+.scrim-left {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.62) 0%,
+    rgba(0, 0, 0, 0.30) 28%,
+    rgba(0, 0, 0, 0.04) 48%,
+    transparent 62%
+  );
+  z-index: 1;
+}
+
+/* ─────────────────────────────────────────
+   SOURCE BADGE  🇯🇵 AniMovie Weebs
+   — left: 121px  top: 318px
+───────────────────────────────────────── */
+.badge {
+  position: absolute;
+  left: 121px;
+  top: 318px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 10;
+}
+
+.flag-chip {
+  width: 46px;
+  height: 31px;
+  background: #fff;
+  border-radius: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.flag-circle {
+  width: 18px;
+  height: 18px;
+  background: #BC002D;
+  border-radius: 50%;
+}
+
+.badge-text {
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.70);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────
+   HERO LOGO  →  logo.png
+   — left: 105px  top: 360px  width: 313px
+   (logo.png is 1166×223 RGBA — transparent bg,
+    rendered at 313 × auto ≈ 313×60px)
+───────────────────────────────────────── */
+.hero-logo {
+  position: absolute;
+  left: 105px;
+  top: 360px;
+  width: 313px;
+  height: auto;
+  z-index: 10;
+  filter: drop-shadow(0 4px 18px rgba(0, 0, 0, 0.50));
+}
+
+/* ─────────────────────────────────────────
+   POSTER THUMBNAIL CARD  →  poster.webp
+   — left: 104px  top: 447px  190 × 290px
+   (poster.webp is 1707×2560 RGB, ratio ≈ 2:3,
+    exactly matches the 190×290 card — minimal crop)
+───────────────────────────────────────── */
+.poster-card {
+  position: absolute;
+  left: 104px;
+  top: 447px;
+  width: 190px;
+  height: 290px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 22px 44px rgba(0, 0, 0, 0.55),
+    0 6px 14px rgba(0, 0, 0, 0.30);
+  z-index: 10;
+}
+
+.poster-card img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 8%;
+  display: block;
+}
+
+/* ─────────────────────────────────────────
+   JAPANESE TITLE BLOCK
+   — left: 337px  top: 451px
+───────────────────────────────────────── */
+.jp-title {
+  position: absolute;
+  left: 337px;
+  top: 451px;
+  font-size: 25px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.65);
+  letter-spacing: 0.02em;
+  z-index: 10;
+}
+
+.roman-title {
+  position: absolute;
+  left: 334px;
+  top: 485px;
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.65);
+  z-index: 10;
+}
+
+/* ─────────────────────────────────────────
+   METADATA ROW
+   — left: 336px  top: 520px
+───────────────────────────────────────── */
+.metadata {
+  position: absolute;
+  left: 336px;
+  top: 520px;
+  font-size: 16px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  letter-spacing: 0.01em;
+  z-index: 10;
+}
+
+.metadata .sep {
+  display: inline-block;
+  margin: 0 9px;
+  opacity: 0.55;
+}
+
+/* ─────────────────────────────────────────
+   SYNOPSIS
+   — left: 333px  top: 568px  max-width: 536px
+───────────────────────────────────────── */
+.synopsis {
+  position: absolute;
+  left: 333px;
+  top: 568px;
+  width: 536px;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.58;
+  color: rgba(255, 255, 255, 0.88);
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.58);
+  z-index: 10;
+}
+
+/* ─────────────────────────────────────────
+   GENRE PILLS
+   — left: 336px  top: 694px  height: 44px
+   Stadium shape, semi-transparent fill, white stroke
+───────────────────────────────────────── */
+.pills {
+  position: absolute;
+  left: 336px;
+  top: 694px;
+  display: flex;
+  gap: 14px;
+  z-index: 10;
+}
+
+.pill {
+  height: 44px;
+  padding: 0 24px;
+  border: 1.5px solid rgba(255, 255, 255, 0.52);
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.42);
+  color: #fff;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  cursor: default;
+}
+
+/* ─────────────────────────────────────────
+   RATING CLUSTER  (top-right, centred ~x 1325)
+   right: 40px → centre at 1440 - 40 - 71 ≈ 1329
+───────────────────────────────────────── */
+.rating-col {
+  position: absolute;
+  right: 38px;
+  top: 118px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 144px;
+  z-index: 10;
+}
+
+.imdb-number {
+  font-size: 42px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.55);
+  letter-spacing: -0.01em;
+}
+
+.imdb-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.10em;
+  margin-top: 6px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+}
+
+/* SVG progress ring — 132×132px, r=57.5, stroke-width=17
+   Circumference = 2π×57.5 ≈ 361.28
+   82% filled   → dasharray = 296.3 65                     */
+.ring-wrap {
+  position: relative;
+  width: 132px;
+  height: 132px;
+  margin-top: 22px;
+}
+
+.ring-wrap svg {
+  width: 132px;
+  height: 132px;
+  display: block;
+}
+
+.ring-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 34px;
+  font-weight: 700;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+}
+
+.anilist-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  margin-top: 11px;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────
+   LIKE / SAVE  row
+   — left: 1115px  top: 630px
+───────────────────────────────────────── */
+.actions {
+  position: absolute;
+  left: 1115px;
+  top: 630px;
+  display: flex;
+  align-items: center;
+  gap: 38px;
+  z-index: 10;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #fff;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.action-btn svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────
+   DIRECTOR CREDIT  (right-aligned, right: 40px)
+   — right: 40px  top: 693px
+   Both lines share the same right edge ≈ x 1400
+───────────────────────────────────────── */
+.director {
+  position: absolute;
+  right: 40px;
+  top: 693px;
+  text-align: right;
+  z-index: 10;
+}
+
+.director-label {
+  font-size: 27px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.1;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.65);
+}
+
+.director-name {
+  font-size: 24px;
+  font-weight: 500;
+  color: #fff;
+  margin-top: 5px;
+  text-shadow: 0 3px 14px rgba(0, 0, 0, 0.65);
+}
+
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- ────────────────────────────────────
+       BACKGROUND  →  background.webp
+       3840×2160 16:9 landscape art
+  ──────────────────────────────────────── -->
+  <img class="bg" src="background.webp" alt="">
+  <div class="scrim-bottom"></div>
+  <div class="scrim-left"></div>
+
+  <!-- ────────────────────────────────────
+       SOURCE BADGE   🇯🇵 AniMovie Weebs
+       left 121  top 318
+  ──────────────────────────────────────── -->
+  <div class="badge">
+    <div class="flag-chip">
+      <div class="flag-circle"></div>
+    </div>
+    <span class="badge-text">AniMovie Weebs</span>
+  </div>
+
+  <!-- ────────────────────────────────────
+       HERO TITLE LOGO  →  logo.png
+       1166×223 RGBA (transparent bg)
+       rendered at 313 × auto px
+       left 105  top 360
+  ──────────────────────────────────────── -->
+  <img class="hero-logo" src="logo.png" alt="Suzume">
+
+  <!-- ────────────────────────────────────
+       POSTER THUMBNAIL  →  poster.webp
+       1707×2560 RGB (2:3 ratio)
+       card: 190×290 px  radius 16px
+       left 104  top 447
+  ──────────────────────────────────────── -->
+  <div class="poster-card">
+    <img src="poster.webp" alt="Suzume poster">
+  </div>
+
+  <!-- ────────────────────────────────────
+       JAPANESE TITLE + ROMANIZATION
+       left 337  top 451 / 485
+  ──────────────────────────────────────── -->
+  <div class="jp-title">すずめの戸締まり</div>
+  <div class="roman-title">(Suzume no Tojimari)</div>
+
+  <!-- ────────────────────────────────────
+       METADATA ROW
+       left 336  top 520
+  ──────────────────────────────────────── -->
+  <div class="metadata">
+    2022<span class="sep">|</span>G<span class="sep">|</span>2h 1m<span class="sep">|</span>Language: Japanese &amp; English
+  </div>
+
+  <!-- ────────────────────────────────────
+       SYNOPSIS
+       left 333  top 568  width 536px
+  ──────────────────────────────────────── -->
+  <div class="synopsis">
+    Suzume, a 17-year-old from Kyushu, meets a young man searching for a door. They find and open one in the mountains, triggering disasters across Japan. Suzume grows and finds freedom as she closes these doors.
+  </div>
+
+  <!-- ────────────────────────────────────
+       GENRE PILLS
+       left 336  top 694  height 44px
+  ──────────────────────────────────────── -->
+  <div class="pills">
+    <div class="pill">Adventure</div>
+    <div class="pill">Fantasy</div>
+    <div class="pill">Mystery</div>
+    <div class="pill">Supernatural</div>
+  </div>
+
+  <!-- ────────────────────────────────────
+       RATING CLUSTER
+       right 38  top 118
+       7.6 / IMDB  →  ring 82%  →  Anilist Rating
+  ──────────────────────────────────────── -->
+  <div class="rating-col">
+    <div class="imdb-number">7.6</div>
+    <div class="imdb-label">IMDB</div>
+
+    <div class="ring-wrap">
+      <svg viewBox="0 0 132 132" xmlns="http://www.w3.org/2000/svg">
+        <!-- Background track (unfilled 18%) -->
+        <circle
+          cx="66" cy="66" r="57.5"
+          fill="none"
+          stroke="rgba(255,255,255,0.28)"
+          stroke-width="17"
+          stroke-linecap="round"/>
+        <!-- Progress arc (82%, clockwise from 12 o'clock)
+             C = 2π×57.5 ≈ 361.28
+             82% → 296.25  |  gap 18% → 65.03         -->
+        <circle
+          cx="66" cy="66" r="57.5"
+          fill="none"
+          stroke="#ffffff"
+          stroke-width="17"
+          stroke-linecap="round"
+          stroke-dasharray="296.25 65.03"
+          transform="rotate(-90 66 66)"/>
+      </svg>
+      <div class="ring-pct">82%</div>
+    </div>
+
+    <div class="anilist-label">Anilist Rating</div>
+  </div>
+
+  <!-- ────────────────────────────────────
+       LIKE / SAVE ACTIONS
+       left 1115  top 630
+  ──────────────────────────────────────── -->
+  <div class="actions">
+    <button class="action-btn">
+      <!-- Heart icon (outline) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06
+                 a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78
+                 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+      </svg>
+      Like
+    </button>
+
+    <button class="action-btn">
+      <!-- Bookmark icon (outline) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+      </svg>
+      Save to watch later
+    </button>
+  </div>
+
+  <!-- ────────────────────────────────────
+       DIRECTOR CREDIT  (right-aligned)
+       right 40  top 693
+  ──────────────────────────────────────── -->
+  <div class="director">
+    <div class="director-label">Director:</div>
+    <div class="director-name">Makoto Shinkai</div>
+  </div>
+
+</div><!-- /.card -->
+</body>
+</html>

@@ -234,6 +234,13 @@ class BotManager:
         if self._c.config.features.temporary_links:
             self._scheduler.every(60, dist.sweep_expired, id="link-expiry-sweep")
 
+        # Stats: refresh the pinned database stats message in the index channel.
+        if self._c.config.index_channel.enabled:
+            from nekofetch.services.stats_service import StatsService
+
+            await StatsService(self._c).refresh()
+            log.info("stats.refreshed_on_startup")
+
         # Log channel: create/pin the dashboard + catalog, then refresh on an interval.
         if self._c.config.log_channel.enabled:
             from nekofetch.services.log_channel_service import LogChannelService

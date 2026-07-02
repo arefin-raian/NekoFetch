@@ -89,6 +89,7 @@ class AudioType(StrEnum):
     SUBBED = "subbed"
     DUBBED = "dubbed"
     DUAL_AUDIO = "dual_audio"
+    MULTI = "multi"
 
 
 class BotKind(StrEnum):

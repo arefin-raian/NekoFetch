@@ -333,6 +333,48 @@ class M:
     MANUAL_QUEUED = "manual_queued"
     MANUAL_QUEUE_FAILED = "manual_queue_failed"
 
+    # ── manual upload wizard ──
+    MANUAL_WIZ_COMP_TITLE = "manual_wiz_comp_title"
+    MANUAL_WIZ_COMP_PROMPT = "manual_wiz_comp_prompt"
+    MANUAL_WIZ_COMP_SEASON = "manual_wiz_comp_season"
+    MANUAL_WIZ_COMP_OVA = "manual_wiz_comp_ova"
+    MANUAL_WIZ_COMP_MOVIE = "manual_wiz_comp_movie"
+    MANUAL_WIZ_COMP_ONA = "manual_wiz_comp_ona"
+    MANUAL_WIZ_COMP_SPECIAL = "manual_wiz_comp_special"
+    MANUAL_WIZ_COMP_ENTIRE = "manual_wiz_comp_entire"
+    MANUAL_WIZ_COMP_DONE = "manual_wiz_comp_done"
+    MANUAL_WIZ_AUDIO_TITLE = "manual_wiz_audio_title"
+    MANUAL_WIZ_AUDIO_SUBBED = "manual_wiz_audio_subbed"
+    MANUAL_WIZ_AUDIO_DUBBED = "manual_wiz_audio_dubbed"
+    MANUAL_WIZ_AUDIO_DUAL = "manual_wiz_audio_dual"
+    MANUAL_WIZ_AUDIO_MULTI = "manual_wiz_audio_multi"
+    MANUAL_WIZ_RES_TITLE = "manual_wiz_res_title"
+    MANUAL_WIZ_RES_360P = "manual_wiz_res_360p"
+    MANUAL_WIZ_RES_480P = "manual_wiz_res_480p"
+    MANUAL_WIZ_RES_540P = "manual_wiz_res_540p"
+    MANUAL_WIZ_RES_720P = "manual_wiz_res_720p"
+    MANUAL_WIZ_RES_1080P = "manual_wiz_res_1080p"
+    MANUAL_WIZ_RES_CUSTOM = "manual_wiz_res_custom"
+    MANUAL_WIZ_RES_DONE = "manual_wiz_res_done"
+    MANUAL_WIZ_CONFIRM_TITLE = "manual_wiz_confirm_title"
+    MANUAL_WIZ_CONFIRM_LINE = "manual_wiz_confirm_line"
+    MANUAL_WIZ_CONFIRM_EMPTY = "manual_wiz_confirm_empty"
+    MANUAL_WIZ_CONFIRM_BTN = "manual_wiz_confirm_btn"
+    MANUAL_WIZ_CHANGE_BTN = "manual_wiz_change_btn"
+    MANUAL_INTAKE_PROMPT = "manual_intake_prompt"
+    MANUAL_INTAKE_INSTRUCTIONS = "manual_intake_instructions"
+    MANUAL_INTAKE_RECEIVED = "manual_intake_received"
+    MANUAL_INTAKE_BATCH_DONE = "manual_intake_batch_done"
+    MANUAL_INTAKE_NEXT = "manual_intake_next"
+    MANUAL_INTAKE_ALL_DONE = "manual_intake_all_done"
+    MANUAL_PROCESSING_TITLE = "manual_processing_title"
+    MANUAL_PROCESSING_DONE = "manual_processing_done"
+    MANUAL_CANCELLED = "manual_cancelled"
+    MANUAL_NO_FILES = "manual_no_files"
+    MANUAL_INVALID_FILE = "manual_invalid_file"
+    MANUAL_SORT_ERROR = "manual_sort_error"
+    MANUAL_WIZ_RES_CUSTOM_PROMPT = "manual_wiz_res_custom_prompt"
+
     # ── admin home / settings ──
     BTN_REVIEW_REQUESTS = "btn_review_requests"
     ADMIN_BTN_PANEL = "admin_btn_panel"
@@ -484,6 +526,18 @@ class M:
         "sources": "settings_sec_sources",
         "ui": "settings_sec_ui",
     }
+
+    # ── database statistics ──
+    STATS_TITLE = "stats_title"
+    STATS_OVERVIEW = "stats_overview"
+    STATS_TOTAL = "stats_total"
+    STATS_PUBLISHED = "stats_published"
+    STATS_NOT_INDEXED = "stats_not_indexed"
+    STATS_PENDING_TITLE = "stats_pending_title"
+    STATS_NONE_PENDING = "stats_none_pending"
+    STATS_UPDATED = "stats_updated"
+    STATS_ROW = "stats_row"
+    STATS_ENTRY = "stats_entry"
 
     # ── bot creation / distribution ──
     BOT_WATCH_GUIDE = "bot_watch_guide"

@@ -1,0 +1,742 @@
+{
+  "86: Eighty Six": {
+    "canonical_name": "86 EIGHTY-SIX",
+    "anilist_id": 116589,
+    "match_quality": "exact"
+  },
+  "91 Days": {
+    "canonical_name": "91 Days",
+    "anilist_id": 21711,
+    "match_quality": "exact"
+  },
+  "A Condition Called Love": {
+    "canonical_name": "A Condition Called Love",
+    "anilist_id": 165855,
+    "match_quality": "exact"
+  },
+  "A SIGN OF AFFECTION": {
+    "canonical_name": "A Sign of Affection",
+    "anilist_id": 166794,
+    "match_quality": "exact"
+  },
+  "AKAME GA KILL": {
+    "canonical_name": "Akame ga Kill!",
+    "anilist_id": 20613,
+    "match_quality": "fuzzy"
+  },
+  "ATTACK ON TITAN": {
+    "canonical_name": "Attack on Titan",
+    "anilist_id": 16498,
+    "match_quality": "exact"
+  },
+  "Alya Sometimes Hides Her Feelings in Russian": {
+    "canonical_name": "Alya Sometimes Hides Her Feelings in Russian",
+    "anilist_id": 162804,
+    "match_quality": "exact"
+  },
+  "Another": {
+    "canonical_name": "Another",
+    "anilist_id": 11111,
+    "match_quality": "exact"
+  },
+  "Assassination Classroom": {
+    "canonical_name": "Assassination Classroom",
+    "anilist_id": 20755,
+    "match_quality": "exact"
+  },
+  "BACCANO!": {
+    "canonical_name": "Baccano!",
+    "anilist_id": 2251,
+    "match_quality": "exact"
+  },
+  "BARAKAMON": {
+    "canonical_name": "Barakamon",
+    "anilist_id": 20722,
+    "match_quality": "exact"
+  },
+  "BLUE SPRING RIDE": {
+    "canonical_name": "Blue Spring Ride",
+    "anilist_id": 20596,
+    "match_quality": "exact"
+  },
+  "Batman Ninja": {
+    "canonical_name": "Batman Ninja",
+    "anilist_id": 100248,
+    "match_quality": "exact"
+  },
+  "Berserk": {
+    "canonical_name": "Berserk",
+    "anilist_id": 33,
+    "match_quality": "exact"
+  },
+  "Berserk of Gluttony": {
+    "canonical_name": "Berserk of Gluttony",
+    "anilist_id": 156039,
+    "match_quality": "exact"
+  },
+  "Beyond the Boundary": {
+    "canonical_name": "Beyond the Boundary",
+    "anilist_id": 18153,
+    "match_quality": "exact"
+  },
+  "Black Bullet": {
+    "canonical_name": "Black Bullet",
+    "anilist_id": 20457,
+    "match_quality": "exact"
+  },
+  "Black Clover": {
+    "canonical_name": "Black Clover",
+    "anilist_id": 97940,
+    "match_quality": "exact"
+  },
+  "Bleach": {
+    "canonical_name": "Bleach",
+    "anilist_id": 269,
+    "match_quality": "exact"
+  },
+  "Blue Exorcist": {
+    "canonical_name": "Blue Exorcist",
+    "anilist_id": 9919,
+    "match_quality": "exact"
+  },
+  "Blue Lock": {
+    "canonical_name": "BLUE LOCK",
+    "anilist_id": 137822,
+    "match_quality": "exact"
+  },
+  "Bocchi the Rock!": {
+    "canonical_name": "BOCCHI THE ROCK!",
+    "anilist_id": 130003,
+    "match_quality": "exact"
+  },
+  "Bottom-Tier Character Tomozaki": {
+    "canonical_name": "Bottom-Tier Character Tomozaki",
+    "anilist_id": 112443,
+    "match_quality": "exact"
+  },
+  "Buddy Daddies": {
+    "canonical_name": "Buddy Daddies",
+    "anilist_id": 155907,
+    "match_quality": "exact"
+  },
+  "Bungo Stray Dogs": {
+    "canonical_name": "Bungo Stray Dogs",
+    "anilist_id": 21311,
+    "match_quality": "exact"
+  },
+  "CLAYMORE": {
+    "canonical_name": "Claymore",
+    "anilist_id": 1818,
+    "match_quality": "exact"
+  },
+  "CODE GEASS": {
+    "canonical_name": "Code Geass: Lelouch of the Rebellion",
+    "anilist_id": 1575,
+    "match_quality": "fuzzy"
+  },
+  "COWBOY BEBOP": {
+    "canonical_name": "Cowboy Bebop",
+    "anilist_id": 1,
+    "match_quality": "exact"
+  },
+  "Call of the Night": {
+    "canonical_name": "Call of the Night",
+    "anilist_id": 141391,
+    "match_quality": "exact"
+  },
+  "Chainsaw Man": {
+    "canonical_name": "Chainsaw Man",
+    "anilist_id": 127230,
+    "match_quality": "exact"
+  },
+  "Charlotte": {
+    "canonical_name": "Charlotte",
+    "anilist_id": 20997,
+    "match_quality": "exact"
+  },
+  "Clannad": {
+    "canonical_name": "Clannad",
+    "anilist_id": 2167,
+    "match_quality": "exact"
+  },
+  "Classroom of the Elite": {
+    "canonical_name": "Classroom of the Elite",
+    "anilist_id": 98659,
+    "match_quality": "exact"
+  },
+  "Cyberpunk: Edgerunners": {
+    "canonical_name": "Cyberpunk: Edgerunners",
+    "anilist_id": 120377,
+    "match_quality": "exact"
+  },
+  "DAYS WITH MY STEPSISTER": {
+    "canonical_name": "Days with My Stepsister",
+    "anilist_id": 152681,
+    "match_quality": "exact"
+  },
+  "DEATH NOTE": {
+    "canonical_name": "Death Note",
+    "anilist_id": 1535,
+    "match_quality": "exact"
+  },
+  "DEVILMAN CRYBABY": {
+    "canonical_name": "Devilman Crybaby",
+    "anilist_id": 98460,
+    "match_quality": "exact"
+  },
+  "DORORO": {
+    "canonical_name": "Dororo",
+    "anilist_id": 101347,
+    "match_quality": "exact"
+  },
+  "DanDaDan": {
+    "canonical_name": "DAN DA DAN",
+    "anilist_id": 171018,
+    "match_quality": "exact"
+  },
+  "Darling in the Franxx": {
+    "canonical_name": "DARLING in the FRANXX",
+    "anilist_id": 99423,
+    "match_quality": "exact"
+  },
+  "Demon Slayer: Kimetsu no Yaiba": {
+    "canonical_name": "Demon Slayer: Kimetsu no Yaiba",
+    "anilist_id": 101922,
+    "match_quality": "exact"
+  },
+  "Domestic Girlfriend": {
+    "canonical_name": "Domestic Girlfriend",
+    "anilist_id": 103139,
+    "match_quality": "exact"
+  },
+  "Dorohedoro": {
+    "canonical_name": "Dorohedoro",
+    "anilist_id": 105228,
+    "match_quality": "exact"
+  },
+  "Dr. Stone": {
+    "canonical_name": "Dr. STONE",
+    "anilist_id": 105333,
+    "match_quality": "exact"
+  },
+  "ELFEN LIED": {
+    "canonical_name": "Elfen Lied",
+    "anilist_id": 226,
+    "match_quality": "exact"
+  },
+  "Erased": {
+    "canonical_name": "ERASED",
+    "anilist_id": 21234,
+    "match_quality": "exact"
+  },
+  "FAIRY TAIL": {
+    "canonical_name": "Fairy Tail",
+    "anilist_id": 6702,
+    "match_quality": "exact"
+  },
+  "FIRE FORCE": {
+    "canonical_name": "Fire Force",
+    "anilist_id": 105310,
+    "match_quality": "exact"
+  },
+  "FRUITS BASKET": {
+    "canonical_name": "Fruits Basket",
+    "anilist_id": 120,
+    "match_quality": "exact"
+  },
+  "Failure Frame: I Became the Strongest and Annihilated Everything with Low-Level Spells": {
+    "canonical_name": "Failure Frame: I Became the Strongest and Annihilated Everything with Low-Level Spells",
+    "anilist_id": 173694,
+    "match_quality": "exact"
+  },
+  "Frieren: Beyond Journey's End": {
+    "canonical_name": "Frieren: Beyond Journey’s End",
+    "anilist_id": 154587,
+    "match_quality": "fuzzy"
+  },
+  "Fruits Basket": {
+    "canonical_name": "Fruits Basket",
+    "anilist_id": 120,
+    "match_quality": "exact"
+  },
+  "Fullmetal Alchemist: Brotherhood": {
+    "canonical_name": "Fullmetal Alchemist: Brotherhood",
+    "anilist_id": 5114,
+    "match_quality": "exact"
+  },
+  "GRAND BLUE DREAMING": {
+    "canonical_name": "Grand Blue Dreaming",
+    "anilist_id": 100922,
+    "match_quality": "exact"
+  },
+  "GUILTY CROWN": {
+    "canonical_name": "Guilty Crown",
+    "anilist_id": 10793,
+    "match_quality": "exact"
+  },
+  "HUNTER X HUNTER": {
+    "canonical_name": "Hunter x Hunter",
+    "anilist_id": 136,
+    "match_quality": "exact"
+  },
+  "Haikyu!!": {
+    "canonical_name": "HAIKYU!!",
+    "anilist_id": 20464,
+    "match_quality": "exact"
+  },
+  "Heavenly Delusion": {
+    "canonical_name": "Tengoku Daimakyo",
+    "anilist_id": 155783,
+    "match_quality": "exact"
+  },
+  "Hell's Paradise: Jigokuraku": {
+    "canonical_name": "Hell’s Paradise",
+    "anilist_id": 128893,
+    "match_quality": "fuzzy"
+  },
+  "Hellsing": {
+    "canonical_name": "Hellsing",
+    "anilist_id": 270,
+    "match_quality": "exact"
+  },
+  "Horimiya": {
+    "canonical_name": "Horimiya",
+    "anilist_id": 124080,
+    "match_quality": "exact"
+  },
+  "Hyouka": {
+    "canonical_name": "Hyouka",
+    "anilist_id": 12189,
+    "match_quality": "exact"
+  },
+  "ID": {
+    "canonical_name": "ID: INVADED",
+    "anilist_id": 110350,
+    "match_quality": "fuzzy"
+  },
+  "In Another World with My Smartphone": {
+    "canonical_name": "In Another World With My Smartphone",
+    "anilist_id": 98491,
+    "match_quality": "exact"
+  },
+  "JoJo's Bizarre Adventure": {
+    "canonical_name": "JoJo's Bizarre Adventure",
+    "anilist_id": 666,
+    "match_quality": "exact"
+  },
+  "Jujutsu Kaisen": {
+    "canonical_name": "JUJUTSU KAISEN",
+    "anilist_id": 113415,
+    "match_quality": "exact"
+  },
+  "KENICHI TMD": {
+    "canonical_name": "Kenichi: The Mightiest Disciple",
+    "anilist_id": 1559,
+    "match_quality": "fallback"
+  },
+  "Kabaneri of the Iron Fortress": {
+    "canonical_name": "Kabaneri of the Iron Fortress",
+    "anilist_id": 21196,
+    "match_quality": "exact"
+  },
+  "Kaiju No. 8": {
+    "canonical_name": "Kaiju No. 8",
+    "anilist_id": 153288,
+    "match_quality": "exact"
+  },
+  "Kimi ni Todoke": {
+    "canonical_name": "Kimi ni Todoke: From Me to You",
+    "anilist_id": 6045,
+    "match_quality": "exact"
+  },
+  "Kingdom Of Ruins": {
+    "canonical_name": "The Kingdoms of Ruin",
+    "anilist_id": 160900,
+    "match_quality": "fallback"
+  },
+  "Komi Can't Communicate": {
+    "canonical_name": "Komi Can’t Communicate",
+    "anilist_id": 133965,
+    "match_quality": "fuzzy"
+  },
+  "KonoSuba: God's Blessing on This Wonderful World!": {
+    "canonical_name": "KONOSUBA -God's blessing on this wonderful world!",
+    "anilist_id": 21202,
+    "match_quality": "alias"
+  },
+  "Kuroko's Basketball": {
+    "canonical_name": "Kuroko's Basketball",
+    "anilist_id": 11771,
+    "match_quality": "exact"
+  },
+  "Link Click": {
+    "canonical_name": "Link Click",
+    "anilist_id": 126403,
+    "match_quality": "exact"
+  },
+  "Loner Life in Another World": {
+    "canonical_name": "Loner Life in Another World",
+    "anilist_id": 173693,
+    "match_quality": "exact"
+  },
+  "MALEVOLENT SPIRITS": {
+    "canonical_name": "Malevolent Spirits: Mononogatari",
+    "anilist_id": 141785,
+    "match_quality": "fuzzy"
+  },
+  "MASHLE": {
+    "canonical_name": "MASHLE: MAGIC AND MUSCLES",
+    "anilist_id": 151801,
+    "match_quality": "exact"
+  },
+  "MONSTER": {
+    "canonical_name": "Monster",
+    "anilist_id": 19,
+    "match_quality": "exact"
+  },
+  "MURAI IN LOVE": {
+    "canonical_name": "Murai In Love",
+    "anilist_id": 150930,
+    "match_quality": "exact"
+  },
+  "MY HAPPY MARRIAGE": {
+    "canonical_name": "My Happy Marriage",
+    "anilist_id": 147103,
+    "match_quality": "exact"
+  },
+  "MY LITTLE MONSTER": {
+    "canonical_name": "My Little Monster",
+    "anilist_id": 14227,
+    "match_quality": "exact"
+  },
+  "MY WIFE HAS NO EMOTION": {
+    "canonical_name": "My Wife Has No Emotion",
+    "anilist_id": 175450,
+    "match_quality": "exact"
+  },
+  "Makeine: Too Many Losing Heroines!": {
+    "canonical_name": "Makeine: Too Many Losing Heroines!",
+    "anilist_id": 171457,
+    "match_quality": "exact"
+  },
+  "Mob Psycho 100": {
+    "canonical_name": "Mob Psycho 100",
+    "anilist_id": 21507,
+    "match_quality": "exact"
+  },
+  "Mushoku Tensei: Jobless Reincarnation": {
+    "canonical_name": "Mushoku Tensei: Jobless Reincarnation",
+    "anilist_id": 108465,
+    "match_quality": "exact"
+  },
+  "My Hero Academia": {
+    "canonical_name": "My Hero Academia",
+    "anilist_id": 21459,
+    "match_quality": "exact"
+  },
+  "My Love Story with Yamada-kun at Lv999": {
+    "canonical_name": "My Love Story with Yamada-kun at Lv999",
+    "anilist_id": 154965,
+    "match_quality": "exact"
+  },
+  "NANA": {
+    "canonical_name": "NANA",
+    "anilist_id": 877,
+    "match_quality": "exact"
+  },
+  "NISEKOI": {
+    "canonical_name": "Nisekoi",
+    "anilist_id": 18897,
+    "match_quality": "exact"
+  },
+  "Naruto": {
+    "canonical_name": "Naruto",
+    "anilist_id": 20,
+    "match_quality": "exact"
+  },
+  "Neon Genesis Evangelion": {
+    "canonical_name": "Neon Genesis Evangelion",
+    "anilist_id": 30,
+    "match_quality": "exact"
+  },
+  "No Game No Life": {
+    "canonical_name": "No Game, No Life",
+    "anilist_id": 19815,
+    "match_quality": "exact"
+  },
+  "No Longer Allowed in Another World": {
+    "canonical_name": "No Longer Allowed in Another World",
+    "anilist_id": 152137,
+    "match_quality": "exact"
+  },
+  "Noragami": {
+    "canonical_name": "Noragami",
+    "anilist_id": 20447,
+    "match_quality": "exact"
+  },
+  "One Punch Man": {
+    "canonical_name": "One-Punch Man",
+    "anilist_id": 21087,
+    "match_quality": "exact"
+  },
+  "Oshi no Ko": {
+    "canonical_name": "Oshi No Ko",
+    "anilist_id": 150672,
+    "match_quality": "exact"
+  },
+  "Our Last Crusade": {
+    "canonical_name": "Our Last Crusade or the Rise of a New World",
+    "anilist_id": 112667,
+    "match_quality": "fuzzy"
+  },
+  "Overlord": {
+    "canonical_name": "Overlord",
+    "anilist_id": 20832,
+    "match_quality": "exact"
+  },
+  "Paranoia Agent": {
+    "canonical_name": "Paranoia Agent",
+    "anilist_id": 323,
+    "match_quality": "exact"
+  },
+  "Parasyte: The Maxim": {
+    "canonical_name": "Parasyte -the maxim-",
+    "anilist_id": 20623,
+    "match_quality": "fuzzy"
+  },
+  "Plastic Memories": {
+    "canonical_name": "Plastic Memories",
+    "anilist_id": 20872,
+    "match_quality": "exact"
+  },
+  "Platinum End": {
+    "canonical_name": "Platinum End",
+    "anilist_id": 127401,
+    "match_quality": "exact"
+  },
+  "Pluto": {
+    "canonical_name": "PLUTO",
+    "anilist_id": 99088,
+    "match_quality": "exact"
+  },
+  "Ranma 1/2": {
+    "canonical_name": "Ranma ½",
+    "anilist_id": 210,
+    "match_quality": "exact"
+  },
+  "Rascal Does Not Dream of Bunny Girl Senpai": {
+    "canonical_name": "Rascal Does Not Dream of Bunny Girl Senpai",
+    "anilist_id": 101291,
+    "match_quality": "exact"
+  },
+  "Rent-A-Girlfriend": {
+    "canonical_name": "Rent-a-Girlfriend",
+    "anilist_id": 113813,
+    "match_quality": "exact"
+  },
+  "SPY X FAMILY": {
+    "canonical_name": "SPY x FAMILY",
+    "anilist_id": 140960,
+    "match_quality": "exact"
+  },
+  "Samurai Champloo": {
+    "canonical_name": "Samurai Champloo",
+    "anilist_id": 205,
+    "match_quality": "exact"
+  },
+  "Serial Experiments Lain": {
+    "canonical_name": "Serial Experiments Lain",
+    "anilist_id": 339,
+    "match_quality": "exact"
+  },
+  "Shangri-La Frontier": {
+    "canonical_name": "Shangri-La Frontier",
+    "anilist_id": 151970,
+    "match_quality": "exact"
+  },
+  "Shikimori's Not Just a Cutie": {
+    "canonical_name": "Shikimori's Not Just a Cutie",
+    "anilist_id": 127911,
+    "match_quality": "exact"
+  },
+  "Shoshimin: How to Become Ordinary": {
+    "canonical_name": "SHOSHIMIN: How to Become Ordinary",
+    "anilist_id": 173295,
+    "match_quality": "exact"
+  },
+  "Snow White with Red Hair": {
+    "canonical_name": "Snow White with the Red Hair",
+    "anilist_id": 21058,
+    "match_quality": "fuzzy"
+  },
+  "Solo Leveling": {
+    "canonical_name": "Solo Leveling",
+    "anilist_id": 151807,
+    "match_quality": "exact"
+  },
+  "Spirit Chronicles": {
+    "canonical_name": "Seirei Gensouki: Spirit Chronicles",
+    "anilist_id": 126546,
+    "match_quality": "fuzzy"
+  },
+  "Steins;Gate": {
+    "canonical_name": "Steins;Gate",
+    "anilist_id": 9253,
+    "match_quality": "exact"
+  },
+  "Suppose a Kid from the Last Dungeon Boonies Moved to a Starter Town": {
+    "canonical_name": "Suppose a Kid from the Last Dungeon Boonies moved to a starter town?",
+    "anilist_id": 112649,
+    "match_quality": "fuzzy"
+  },
+  "Sword Art Online": {
+    "canonical_name": "Sword Art Online",
+    "anilist_id": 11757,
+    "match_quality": "exact"
+  },
+  "Sword Art Online Alternative: Gun Gale Online": {
+    "canonical_name": "Sword Art Online Alternative: Gun Gale Online",
+    "anilist_id": 100183,
+    "match_quality": "exact"
+  },
+  "TORADORA": {
+    "canonical_name": "Toradora!",
+    "anilist_id": 4224,
+    "match_quality": "fuzzy"
+  },
+  "Terror in Resonance": {
+    "canonical_name": "Terror in Resonance",
+    "anilist_id": 20661,
+    "match_quality": "exact"
+  },
+  "That Time I Got Reincarnated as a Slime": {
+    "canonical_name": "That Time I Got Reincarnated as a Slime",
+    "anilist_id": 101280,
+    "match_quality": "exact"
+  },
+  "The Apothecary Diaries": {
+    "canonical_name": "The Apothecary Diaries",
+    "anilist_id": 161645,
+    "match_quality": "exact"
+  },
+  "The Dangers in My Heart": {
+    "canonical_name": "The Dangers in My Heart",
+    "anilist_id": 153152,
+    "match_quality": "exact"
+  },
+  "The Eminence in Shadow": {
+    "canonical_name": "The Eminence in Shadow",
+    "anilist_id": 130298,
+    "match_quality": "exact"
+  },
+  "The Executioner": {
+    "canonical_name": "The Executioner and Her Way of Life",
+    "anilist_id": 129193,
+    "match_quality": "fuzzy"
+  },
+  "The Girl I Like Forgot Her Glasses": {
+    "canonical_name": "The Girl I Like Forgot Her Glasses",
+    "anilist_id": 160188,
+    "match_quality": "exact"
+  },
+  "The God of High School": {
+    "canonical_name": "The God of High School",
+    "anilist_id": 116006,
+    "match_quality": "exact"
+  },
+  "The New Gate": {
+    "canonical_name": "THE NEW GATE",
+    "anilist_id": 170890,
+    "match_quality": "exact"
+  },
+  "The Promised Neverland": {
+    "canonical_name": "The Promised Neverland",
+    "anilist_id": 101759,
+    "match_quality": "exact"
+  },
+  "The Reincarnation of the Strongest Exorcist in Another World": {
+    "canonical_name": "The Reincarnation of the Strongest Exorcist in Another World",
+    "anilist_id": 144553,
+    "match_quality": "exact"
+  },
+  "Tokyo Ghoul": {
+    "canonical_name": "Tokyo Ghoul",
+    "anilist_id": 20605,
+    "match_quality": "exact"
+  },
+  "Tokyo Revengers": {
+    "canonical_name": "Tokyo Revengers",
+    "anilist_id": 120120,
+    "match_quality": "exact"
+  },
+  "Tomo-chan Is a Girl!": {
+    "canonical_name": "Tomo-chan Is a Girl!",
+    "anilist_id": 151806,
+    "match_quality": "exact"
+  },
+  "Tower of God": {
+    "canonical_name": "Tower of God",
+    "anilist_id": 115230,
+    "match_quality": "exact"
+  },
+  "True Beauty": {
+    "canonical_name": "True Beauty",
+    "anilist_id": 152184,
+    "match_quality": "exact"
+  },
+  "Tsukimichi: Moonlit Fantasy": {
+    "canonical_name": "TSUKIMICHI -Moonlit Fantasy-",
+    "anilist_id": 125206,
+    "match_quality": "fuzzy"
+  },
+  "Undead Unluck": {
+    "canonical_name": "Undead Unluck",
+    "anilist_id": 154116,
+    "match_quality": "exact"
+  },
+  "Uzumaki": {
+    "canonical_name": "Uzumaki",
+    "anilist_id": 111314,
+    "match_quality": "exact"
+  },
+  "Vinland Saga": {
+    "canonical_name": "Vinland Saga",
+    "anilist_id": 101348,
+    "match_quality": "exact"
+  },
+  "Violet Evergarden": {
+    "canonical_name": "Violet Evergarden",
+    "anilist_id": 21827,
+    "match_quality": "exact"
+  },
+  "WIND BREAKER": {
+    "canonical_name": "WIND BREAKER",
+    "anilist_id": 163270,
+    "match_quality": "exact"
+  },
+  "Why Does Nobody Remember Me in This World?": {
+    "canonical_name": "Why Does Nobody Remember Me in This World?",
+    "anilist_id": 167419,
+    "match_quality": "exact"
+  },
+  "Wistoria: Wand and Sword": {
+    "canonical_name": "Wistoria: Wand and Sword",
+    "anilist_id": 174576,
+    "match_quality": "exact"
+  },
+  "World's End Harem": {
+    "canonical_name": "World's End Harem",
+    "anilist_id": 118465,
+    "match_quality": "exact"
+  },
+  "Your Lie in April": {
+    "canonical_name": "Your lie in April",
+    "anilist_id": 20665,
+    "match_quality": "exact"
+  },
+  "Zom 100: Bucket List of the Dead": {
+    "canonical_name": "Zom 100: Bucket List of the Dead",
+    "anilist_id": 159831,
+    "match_quality": "exact"
+  }
+}
