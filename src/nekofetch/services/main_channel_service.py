@@ -36,6 +36,7 @@ _AUDIO_LANG = {
     AudioType.DUBBED: ["English"],
     AudioType.SUBBED: ["Japanese"],
     AudioType.DUAL_AUDIO: ["English", "Japanese"],
+    AudioType.MULTI: ["English", "Japanese", "Hindi"],
 }
 
 

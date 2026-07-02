@@ -236,10 +236,13 @@ class BotManager:
 
         # Stats: refresh the pinned database stats message in the index channel.
         if self._c.config.index_channel.enabled:
-            from nekofetch.services.stats_service import StatsService
+            try:
+                from nekofetch.services.stats_service import StatsService
 
-            await StatsService(self._c).refresh()
-            log.info("stats.refreshed_on_startup")
+                await StatsService(self._c).refresh()
+                log.info("stats.refreshed_on_startup")
+            except Exception as exc:  # noqa: BLE001 - stats must not block startup
+                log.warning("stats.refresh_on_startup.failed", error=str(exc))
 
         # Log channel: create/pin the dashboard + catalog, then refresh on an interval.
         if self._c.config.log_channel.enabled:

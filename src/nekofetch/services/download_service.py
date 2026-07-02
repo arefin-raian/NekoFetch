@@ -152,6 +152,28 @@ class DownloadWorker:
                         failure=kind.value, reason=reason)
             failed.append(self._spec(ep, None, None, dual=False))
             return
+        if getattr(source, "name", "") == "local":
+            # Operator-owned library (also the manual-upload target): ingest exactly
+            # the files present — every laid-down resolution/audio — with no
+            # acquisition-policy filtering. Everything downstream (record → process →
+            # storage → publish) is identical to any other source.
+            for variant in variants:
+                spec = self._spec(ep, variant.resolution, variant.audio, dual=False)
+                try:
+                    if await self._already_have(job_id, ep, variant.resolution, variant.audio):
+                        continue
+                    if not await self._run_unit(job_id, req, source, ep, variant, folder, cfg):
+                        failed.append(spec)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    kind, reason = _classify(exc)
+                    log.warning("download.unit.failed", season=ep.season, episode=ep.number,
+                                resolution=variant.resolution,
+                                audio=variant.audio.value if variant.audio else None,
+                                failure=kind.value, reason=reason)
+                    failed.append(spec)
+            return
         available = {v.resolution for v in variants}
         for resolution in self._resolutions_to_fetch(req, available):
             has_native_dual = any(
@@ -878,6 +900,8 @@ def _audio_for_language(language: str) -> AudioType | None:
         "japanese": AudioType.SUBBED,
         "dual": AudioType.DUAL_AUDIO,
         "dual_audio": AudioType.DUAL_AUDIO,
+        "hindi": AudioType.MULTI,
+        "multi": AudioType.MULTI,
     }.get(language.lower())
 
 

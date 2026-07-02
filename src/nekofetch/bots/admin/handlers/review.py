@@ -362,10 +362,14 @@ def register(client: Client, container: Container) -> None:
                 pass
             components = _extract_components(fr, req.anime_title)
             if len(components) == 1 and components[0]["type"] == "season":
-                # Single season, no extras — skip component picker.
+                # Single season, no extras — skip component picker but still seed
+                # ``selected``/``queue`` so confirm + intake have a component to work
+                # with (otherwise the confirm screen is empty and intake crashes).
+                key0 = _comp_key(components[0])
                 await fsm.set(q.from_user.id, STATE_MANUAL_AUDIO, code=code,
                               anime_title=req.anime_title, components=components,
-                              selected={}, audio={}, resolutions={},
+                              selected={key0: True}, queue=[(components[0], "audio")],
+                              audio={}, resolutions={},
                               current_index=0, backdrop_url=backdrop_url)
                 await _render_audio_picker(q.message, q.from_user.id, components[0], 0)
             else:
@@ -774,13 +778,26 @@ def register(client: Client, container: Container) -> None:
             await q.answer(L(M.ACCESS_DENIED), show_alert=True)
             return
         state, data = await fsm.get(q.from_user.id)
-        if state != STATE_MANUAL_RES:
-            await q.answer()
-            return
         action = q.data.split("|")[3]
         comp_idx = data.get("current_index", 0)
         queue = data.get("queue", [])
         component = queue[comp_idx][0] if queue else {}
+        if action == "back":
+            # Return to the resolution picker from the custom-resolution prompt
+            # (which runs in STATE_MANUAL_CUSTOM_RES, so it bypasses the gate below).
+            await fsm.set(q.from_user.id, STATE_MANUAL_RES,
+                          code=data.get("code"), anime_title=data.get("anime_title"),
+                          components=data.get("components"),
+                          selected=data.get("selected"), queue=queue,
+                          current_index=comp_idx, audio=data.get("audio"),
+                          resolutions=data.get("resolutions", {}),
+                          backdrop_url=data.get("backdrop_url"))
+            await _render_res_picker(q.message, q.from_user.id, component, comp_idx)
+            await q.answer()
+            return
+        if state != STATE_MANUAL_RES:
+            await q.answer()
+            return
         comp_key = _comp_key(component)
         resolutions = data.get("resolutions", {})
         current = list(resolutions.get(comp_key, []))
@@ -803,7 +820,7 @@ def register(client: Client, container: Container) -> None:
                           current_index=comp_idx, audio=data.get("audio"),
                           resolutions=resolutions,
                           backdrop_url=data.get("backdrop_url"))
-            kb = keyboard([(L(M.BTN_BACK), cb("staff", "manual", "res", "done"))])
+            kb = keyboard([(L(M.BTN_BACK), cb("staff", "manual", "res", "back"))])
             backdrop_url = data.get("backdrop_url")
             await show(client, q.message, L(M.MANUAL_WIZ_RES_CUSTOM_PROMPT), kb,
                        image=backdrop_url)
@@ -889,6 +906,13 @@ def register(client: Client, container: Container) -> None:
             aud = audio.get(key, "subbed")
             for res in resolutions.get(key, []):
                 build_order.append((key, comp_label, aud, res))
+        if not build_order:
+            # Nothing to collect (no component/resolution chosen) — bail cleanly
+            # instead of indexing an empty queue.
+            await show(client, msg, L(M.MANUAL_WIZ_CONFIRM_EMPTY),
+                       keyboard([(L(M.BTN_BACK), cb("staff", "rdetail", data.get("code", "")))]),
+                       image=data.get("backdrop_url"))
+            return
         await fsm.set(user_id,
                       STATE_MANUAL_INTAKE,
                       code=data.get("code"), anime_title=data.get("anime_title"),
@@ -1042,65 +1066,104 @@ def register(client: Client, container: Container) -> None:
     async def _process_manual_upload(
         trigger_msg, user_id: int, data: dict,
     ) -> None:
-        """After all files collected: sort, process, upload, enqueue."""
+        """Ingest the collected files into the local library, then hand off to the
+        standard pipeline by enqueuing the request against the ``local`` source.
+
+        Nothing here duplicates processing: the download worker copies each
+        laid-down file and runs every normal stage (rename → subtitles →
+        watermark → mux), uploads the finished packs to the storage channel, and
+        publishes — exactly as for any other source."""
+        import json
+        import re
+        import shutil
         from pathlib import Path
 
+        from nekofetch.infrastructure.database.postgres.session import session_scope
+        from nekofetch.infrastructure.repositories.request_repo import RequestRepository
         from nekofetch.services.queue_service import QueueService
-        from nekofetch.services.request_service import RequestService
-        from nekofetch.sources.telegram.manual_pack import process_pack
-        from nekofetch.sources._torrent import parse_release_meta
+        from nekofetch.sources.local import _slug
 
         code = data.get("code", "")
-        title = data.get("anime_title", "")
+        title = data.get("anime_title", "") or code
         received = data.get("received", {})
         build_order = data.get("build_order", [])
-        audio = data.get("audio", {})
+        comp_map = {_comp_key(c): c for c in data.get("components", [])}
+
+        # Audio value → a filename label LocalFileSource re-detects on ingest.
+        audio_label_map = {
+            "subbed": "Subbed", "dubbed": "Dubbed",
+            "dual_audio": "Dual Audio", "multi": "Multi",
+        }
+        kind_word_map = {"movie": "Movie", "ova": "OVA", "ona": "ONA", "special": "Special"}
+        safe_title = re.sub(r'[<>:"/\\|?*]', "", title).strip() or _slug(title)
 
         try:
-            # 1. Update source to telegram_manual
-            req_svc = RequestService(container)
-            await req_svc.update_source(code, "telegram_manual")
+            slug = _slug(title)
+            lib_dir = Path(container.env.storage_path) / "library" / slug
+            lib_dir.mkdir(parents=True, exist_ok=True)
+            # Expose the real title (not the slug) to the library metadata reader.
+            try:
+                (lib_dir / "anime.json").write_text(
+                    json.dumps({"title": title}), encoding="utf-8"
+                )
+            except Exception:  # noqa: BLE001 - metadata override is best-effort
+                pass
 
-            # 2. Process each batch: sort, normalize, store
-            total_processed = 0
-            work_base = Path(container.env.storage_path) / "work" / "_manual" / code
-            out_base = Path(container.env.storage_path) / "work" / code
-            out_base.mkdir(parents=True, exist_ok=True)
+            # Non-season components (movies/OVAs/specials) each get a dedicated,
+            # collision-free season slot (90+) so their episode numbers never clash
+            # with real seasons or with one another.
+            extra_slot = 90
+            slot_for: dict[str, int] = {}
+            total_files = 0
 
             for batch_idx, batch in enumerate(build_order):
                 comp_key, comp_label, audio_type, res = batch
                 paths = received.get(str(batch_idx), [])
                 if not paths:
                     continue
-                # Sort files by extracted episode number
-                def _ep_sort(filepath: str) -> int:
-                    name = Path(filepath).name
-                    meta = parse_release_meta(name)
-                    ep = meta.get("episode")
-                    return ep if ep is not None else 9999
-                paths.sort(key=_ep_sort)
-                # Determine season number from component
-                season = 1
-                for comp in data.get("components", []):
-                    if _comp_key(comp) == comp_key:
-                        season = comp.get("number", 1)
-                        break
-                result = await process_pack(
-                    anime=title,
-                    quality=res,
-                    ordered_files=paths,
-                    out_dir=out_base,
-                    season=season,
-                    audio_config=audio_type,
-                )
-                total_processed += result.get("processed", 0)
+                comp = comp_map.get(comp_key, {"type": "season", "number": 1})
+                ctype = comp.get("type", "season")
+                if ctype == "season":
+                    season = int(comp.get("number", 1) or 1)
+                    tag = ""
+                else:
+                    if comp_key not in slot_for:
+                        extra_slot += 1
+                        slot_for[comp_key] = extra_slot
+                    season = slot_for[comp_key]
+                    tag = f" - {kind_word_map.get(ctype, 'Special')}"
+                audio_label = audio_label_map.get(audio_type, "Subbed")
+                season_dir = lib_dir / f"Season {season:02d}"
+                season_dir.mkdir(parents=True, exist_ok=True)
+                # Files arrive in episode order (file #1 = E01, …).
+                for i, src in enumerate(paths):
+                    src_path = Path(src)
+                    if not src_path.exists():
+                        continue
+                    ext = src_path.suffix.lstrip(".") or "mkv"
+                    fname = (f"{safe_title} - S{season:02d}E{i + 1:03d}{tag} "
+                             f"[{res}] [{audio_label}].{ext}")
+                    shutil.move(str(src_path), str(season_dir / fname))
+                    total_files += 1
 
-            # 3. Enqueue for standard pipeline
+            if not total_files:
+                raise NekoFetchError("no files were received to process")
+
+            # Repoint the request at the local library and clear any season/episode
+            # narrowing so the worker ingests everything just laid down.
+            async with session_scope(container.pg_sessionmaker) as session:
+                req = await RequestRepository(session).get_by_code(code)
+                if req is None:
+                    raise NekoFetchError(f"request {code} not found")
+                req.source = "local"
+                req.source_ref = slug
+                req.season = None
+                req.episodes = None
+
             job_id = await QueueService(container).enqueue(code)
             await fsm.clear(user_id)
             await trigger_msg.reply(
-                L(M.MANUAL_PROCESSING_DONE, count=total_processed),
-                parse_mode=ParseMode.HTML,
+                L(M.MANUAL_QUEUED, job=job_id), parse_mode=ParseMode.HTML,
             )
         except NekoFetchError as exc:
             await fsm.clear(user_id)
@@ -1109,7 +1172,7 @@ def register(client: Client, container: Container) -> None:
                   reason=getattr(exc, "detail", None) or L(M.ERR_GENERIC)),
                 parse_mode=ParseMode.HTML,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             await fsm.clear(user_id)
             await trigger_msg.reply(
                 L(M.MANUAL_QUEUE_FAILED, reason=str(exc)[:200]),

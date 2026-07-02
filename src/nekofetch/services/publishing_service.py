@@ -164,10 +164,16 @@ class PublishingService:
             audio=aud, resolution=res,
         )
 
-        # Refresh database stats (pinned message in index channel)
-        from nekofetch.services.stats_service import StatsService
+        # Refresh database stats (pinned message in index channel). Best-effort:
+        # a stats hiccup must never fail an otherwise-successful publish.
+        try:
+            from nekofetch.services.stats_service import StatsService
 
-        await StatsService(self._c).refresh()
+            await StatsService(self._c).refresh()
+        except Exception as exc:  # noqa: BLE001
+            from nekofetch.core.logging import get_logger
+
+            get_logger(__name__).warning("publish.stats_refresh.failed", error=str(exc))
 
         if user_id:
             from nekofetch.services.notification_service import NotificationService

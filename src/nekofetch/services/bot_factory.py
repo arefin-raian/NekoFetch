@@ -113,6 +113,8 @@ class BotFactory:
         languages = {_AUDIO_LANGS.get(a) for a in audios}
         if AudioType.DUAL_AUDIO.value in audios:
             languages.update({"english", "japanese"})
+        if AudioType.MULTI.value in audios:
+            languages.update({"english", "japanese", "hindi"})
         languages.discard(None)
         return {"english": english, "romaji": romaji, "audios": audios, "languages": languages}
 

@@ -156,8 +156,8 @@ main_channel:
     <b>⌬ GENRE :</b> {genres}
 
     <blockquote><b>‣ OverView :</b> {overview}</blockquote>
-  index_button_text: "Index"
-  download_button_text: "Download"
+  index_button_text: "Iɴᴅᴇx"
+  download_button_text: "Dᴏᴡɴʟᴏᴀᴅ"
 
 # Index channel: stylized per-letter index posts the bot maintains.
 index_channel:

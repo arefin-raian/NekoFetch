@@ -38,6 +38,7 @@ _LANG_LABELS = {
     AudioType.SUBBED: "Sub",
     AudioType.DUBBED: "Dub",
     AudioType.DUAL_AUDIO: "Dual",
+    AudioType.MULTI: "Multi",
 }
 
 

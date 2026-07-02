@@ -43,6 +43,8 @@ _VIDEO_EXTS = {".mkv", ".mp4", ".avi", ".mov"}
 _SXXEXX = re.compile(r"[Ss](\d{1,2})[\s._-]*[Ee](\d{1,4})")
 _RES = re.compile(r"(\d{3,4})[pP]")
 _AUDIO_HINTS = {
+    "multi": AudioType.MULTI,
+    "multi audio": AudioType.MULTI,
     "dual": AudioType.DUAL_AUDIO,
     "dual audio": AudioType.DUAL_AUDIO,
     "dub": AudioType.DUBBED,

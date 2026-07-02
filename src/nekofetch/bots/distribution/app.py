@@ -393,6 +393,7 @@ f"{bq(f'complete this link, then you\'ll return to the bot '
     async def _nolink(_: Client, q: CallbackQuery) -> None:
         # A language header isn't a link — tapping it previews the instruction to
         # pick a quality from the row beneath it.
+        from nekofetch.localization.messages import M as _M, t as _t
         await q.answer(_t(_M.BOT_CHOOSE_QUALITY), show_alert=True)
 
     return client
